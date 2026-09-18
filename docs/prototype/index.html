@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APK Parser Toolkit — 交互原型 v0.1</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --line:#e3e6ea; --line2:#eef1f4;
+    --tx:#1f2329; --tx2:#5c6672; --tx3:#98a1ab;
+    --accent:#2563eb; --accent-soft:#eaf1ff;
+    --ok:#16a34a; --ok-soft:#e8f8ee;
+    --warn:#d97706; --warn-soft:#fff5e6;
+    --danger:#dc2626; --danger-soft:#fdecec;
+    --purple:#7c3aed;
+    --mono:"Cascadia Mono","JetBrains Mono",Consolas,"SF Mono",Menlo,monospace;
+    --sans:-apple-system,"Segoe UI","Microsoft YaHei",Roboto,"Helvetica Neue",sans-serif;
+    --r:8px; --r2:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{background:var(--bg);color:var(--tx);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--tx);border-radius:6px;padding:5px 11px;transition:.12s}
+  button:hover{border-color:#c9cfd6;background:#fafbfc}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#1d4fd7;border-color:#1d4fd7}
+  button.ghost{border-color:transparent;background:transparent;color:var(--tx2)}
+  button.ghost:hover{background:#eef1f4}
+  button.danger{color:var(--danger);border-color:#f3c9c9}
+  button.danger:hover{background:var(--danger-soft)}
+  input,select,textarea{font:inherit;border:1px solid var(--line);border-radius:6px;padding:5px 9px;background:#fff;color:var(--tx);outline:none}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .mono{font-family:var(--mono)}
+  .muted{color:var(--tx2)}
+  .dim{color:var(--tx3)}
+
+  /* ---------- app shell ---------- */
+  .shell{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  .topbar{display:flex;align-items:center;gap:12px;height:52px;padding:0 14px;background:#fff;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600;letter-spacing:.2px}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent)}
+  .devsel{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;padding:4px 9px;background:#fbfcfd;cursor:pointer}
+  .devsel:hover{border-color:#c9cfd6}
+  .devsel .st{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  .spacer{flex:1}
+  .tb-btn{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:7px;border:1px solid transparent;color:var(--tx2);background:transparent}
+  .tb-btn:hover{background:#eef1f4}
+  .badge{background:var(--danger);color:#fff;border-radius:9px;font-size:11px;padding:0 5px;line-height:16px}
+  .demo-bar{display:flex;gap:8px;padding:8px 14px;background:#111827;color:#e5e7eb;align-items:center;font-size:12.5px;flex:0 0 auto}
+  .demo-bar b{color:#93c5fd;font-weight:600}
+  .demo-bar button{background:#1f2937;border-color:#374151;color:#e5e7eb;font-size:12.5px}
+  .demo-bar button:hover{background:#374151}
+
+  .body{display:flex;flex:1;min-height:0}
+  .nav{width:196px;flex:0 0 auto;background:#fff;border-right:1px solid var(--line);padding:10px 0;overflow:auto}
+  .nav h5{margin:12px 14px 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--tx3);font-weight:600}
+  .nav a{display:flex;align-items:center;gap:9px;padding:7px 14px;color:var(--tx2);text-decoration:none;border-left:2px solid transparent;font-size:13.5px}
+  .nav a:hover{background:#f7f9fb;color:var(--tx)}
+  .nav a.on{background:var(--accent-soft);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  .nav a .i{width:16px;text-align:center}
+  .nav a .tag{margin-left:auto;font-size:10.5px;color:var(--tx3)}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+  .page{display:none;flex:1;min-height:0;overflow:auto;padding:16px}
+  .page.on{display:block}
+  .pagehead{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .pagehead h2{margin:0;font-size:16px;font-weight:650}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r2);padding:14px}
+  .card + .card{margin-top:12px}
+  .card h4{margin:0 0 10px;font-size:13px;font-weight:650;color:var(--tx2);letter-spacing:.3px}
+  .grid2{display:grid;grid-template-columns:300px 1fr;gap:12px;align-items:start}
+
+  /* key bar */
+  .keybar{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,#fff,#fdfefe);border:1px solid var(--line);border-radius:var(--r2);padding:14px 16px;display:flex;align-items:flex-start;gap:14px}
+  .keybar .pkg{font-family:var(--mono);font-size:19px;font-weight:700;letter-spacing:.2px;word-break:break-all;line-height:1.3}
+  .keybar .ver{font-size:14.5px;color:var(--tx);margin-top:5px;font-weight:600}
+  .keybar .meta{font-size:12.5px;color:var(--tx2);margin-top:7px;display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:#f1f4f8;border:1px solid var(--line2);border-radius:20px;padding:1.5px 9px;font-size:12px;color:var(--tx2)}
+  .chip.ok{background:var(--ok-soft);border-color:#c6ebd3;color:#146c37}
+  .chip.warn{background:var(--warn-soft);border-color:#f3ddb5;color:#9a5b05}
+  .chip.bad{background:var(--danger-soft);border-color:#f5cdcd;color:#a81c1c}
+  .chip.acc{background:var(--accent-soft);border-color:#cddffd;color:#1a4bc3}
+
+  /* app list */
+  .searchrow{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  .searchrow input[type=text]{flex:1}
+  .list{max-height:calc(100vh - 300px);min-height:280px;overflow:auto;border:1px solid var(--line);border-radius:var(--r);background:#fff}
+  .row{padding:8px 12px;border-bottom:1px solid var(--line2);cursor:pointer;display:flex;align-items:center;gap:10px}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:#f8fafc}
+  .row.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .row .ico{width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#dbeafe,#bfdbfe);display:grid;place-items:center;font-size:14px;flex:0 0 auto}
+  .row .nm{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+  .row .sub{font-size:11.5px;color:var(--tx3)}
+  .row .right{margin-left:auto;font-size:11.5px;color:var(--tx3);white-space:nowrap}
+  mark{background:#fff2a8;padding:0 1px;border-radius:2px}
+
+  .kv{display:grid;grid-template-columns:96px 1fr;gap:6px 12px;font-size:13px}
+  .kv dt{color:var(--tx2)}
+  .kv dd{margin:0;word-break:break-all}
+  .sk{display:inline-block;height:12px;min-width:110px;border-radius:3px;background:#e8ecf1;vertical-align:middle}
+  .sigerr{background:var(--danger-soft);border:1px solid #f5cdcd;border-radius:7px;padding:9px 11px;font-size:12.5px;color:#a81c1c}
+  .sigwarn{background:var(--warn-soft);border:1px solid #f3ddb5;border-radius:7px;padding:8px 11px;font-size:12.5px;color:#9a5b05;margin-bottom:8px}
+  .fpath{font-family:var(--mono);font-size:11.5px;color:var(--tx2);margin-top:7px}
+  details.why{margin-top:8px;font-size:12.5px}
+  details.why summary{cursor:pointer;color:var(--tx2)}
+  .actions{display:flex;flex-wrap:wrap;gap:7px}
+  .actions button{font-size:12.5px}
+
+  /* launcher */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px}
+  .tabs button{border:none;background:transparent;border-bottom:2px solid transparent;border-radius:0;padding:7px 13px;color:var(--tx2);font-size:13.5px}
+  .tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .comp{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:var(--r);background:#fff}
+  .comp .row{padding:7px 10px}
+  .comp .row.dis{opacity:.55}
+  .cmp-name{font-family:var(--mono);font-size:12.5px}
+  .star{color:#f59e0b}
+  .grp{padding:5px 10px;font-size:11px;color:var(--tx3);background:#f8fafc;border-bottom:1px solid var(--line2);letter-spacing:.5px}
+  .formrow{display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center;font-size:13px}
+  .formrow label{color:var(--tx2);text-align:right}
+  .extras{border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .extras .er{display:grid;grid-template-columns:92px 1fr 1fr 64px;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line2)}
+  .extras .er:last-child{border-bottom:none}
+  .extras .er input,.extras .er select{font-size:12.5px;padding:3px 7px}
+  .preview{margin-top:12px;border:1px solid var(--line);border-radius:var(--r);background:#0f172a;color:#dbeafe;padding:11px 13px;font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;word-break:break-all;line-height:1.7}
+  .preview .c1{color:#7dd3fc}.preview .c2{color:#fcd34d}.preview .c3{color:#c4b5fd}
+  .launchbar{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .result{margin-top:10px;border-radius:var(--r);padding:10px 13px;font-size:13px;display:none}
+  .result.show{display:block}
+  .result.ok{background:var(--ok-soft);border:1px solid #c6ebd3;color:#146c37}
+  .result.bad{background:var(--danger-soft);border:1px solid #f5cdcd;color:#a81c1c}
+  .result .hint{color:var(--tx2);font-size:12.5px;margin-top:5px}
+
+  /* capture */
+  .capgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+  .shot{height:158px;border:1px dashed #cbd5e1;border-radius:var(--r);display:grid;place-items:center;color:var(--tx3);background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 9px,#f4f6f8 9px,#f4f6f8 18px);font-size:12.5px}
+  .bar{height:7px;border-radius:4px;background:#e8ecf1;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+  .rec{color:var(--danger);font-weight:600}
+  .logbox{background:#0f172a;color:#cbd5e1;border-radius:var(--r);padding:10px 12px;font-family:var(--mono);font-size:12px;max-height:190px;overflow:auto;line-height:1.75}
+  .logbox .E{background:#7f1d1d;color:#fecaca;display:block;border-radius:3px;padding:0 4px;margin:0 -4px}
+  .logbox .I{color:#93c5fd}.logbox .W{color:#fcd34d}
+  .artifact{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--line2);font-size:13px}
+  .artifact:last-child{border-bottom:none}
+
+  /* settings */
+  .doctor{display:grid;grid-template-columns:70px 1fr;gap:7px 12px;font-family:var(--mono);font-size:12.5px}
+  .switch{display:flex;align-items:center;gap:9px;padding:6px 0;font-size:13.5px}
+  .sw{width:36px;height:20px;border-radius:12px;background:#cbd5e1;position:relative;flex:0 0 auto;transition:.15s;cursor:pointer}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s}
+  .sw.on{background:var(--accent)}.sw.on::after{left:18px}
+
+  /* overlay: popup card */
+  .veil{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;display:none;align-items:center;justify-content:center;padding:24px}
+  .veil.on{display:flex}
+  .popup{background:#fff;border-radius:14px;width:100%;max-width:760px;max-height:90vh;overflow:auto;box-shadow:0 24px 60px rgba(15,23,42,.28)}
+  .popup .ph{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;position:sticky;top:0;background:#fff;z-index:2}
+  .popup .ph .t{font-weight:650}
+  .popup .pb{padding:16px 20px}
+  .pkhead{padding:16px 20px 14px;background:linear-gradient(135deg,#f0f6ff,#fbfdff);border-bottom:1px solid var(--line)}
+  .pf{display:grid;grid-template-columns:110px 1fr;gap:6px 14px;font-size:13px;padding:12px 0;border-bottom:1px solid var(--line2)}
+  .pf:last-child{border-bottom:none}
+  .pf .k{color:var(--tx2)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+  .bar-item{display:grid;grid-template-columns:150px 1fr 62px;gap:10px;align-items:center;font-size:12.5px;font-family:var(--mono)}
+  .bar-item .b{height:9px;border-radius:5px;background:#eef1f4;overflow:hidden}
+  .bar-item .b>i{display:block;height:100%;background:linear-gradient(90deg,#60a5fa,#2563eb)}
+  .popfoot{padding:13px 20px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;background:#fbfcfd;position:sticky;bottom:0}
+
+  /* overlay: console */
+  .con{background:#0c111b;border-radius:12px;width:100%;max-width:860px;box-shadow:0 24px 60px rgba(0,0,0,.5);overflow:hidden;font-family:var(--mono);font-size:13px;color:#d7e0ea}
+  .con .ch{background:#1a2333;padding:9px 14px;display:flex;align-items:center;gap:8px;color:#9fb0c4;font-size:12.5px}
+  .con .ch .d{width:11px;height:11px;border-radius:50%}
+  .con pre{margin:0;padding:14px 16px;white-space:pre-wrap;line-height:1.72;max-height:64vh;overflow:auto}
+  .g{color:#4ade80}.y{color:#fbbf24}.r{color:#f87171}.b{color:#60a5fa}.w{color:#e2e8f0}.dimc{color:#64748b}.cy{color:#22d3ee}
+  .hl{background:#1e3a5f;border-radius:3px}
+  .cursor{display:inline-block;width:8px;height:15px;background:#4ade80;vertical-align:-2px;animation:bl 1s steps(1) infinite}
+  @keyframes bl{50%{opacity:0}}
+
+  .toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:10px 15px;border-radius:9px;font-size:13px;z-index:99;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
+  .toast.on{opacity:1;transform:none}
+  .note{font-size:12.5px;color:var(--tx2);background:#f8fafc;border-left:3px solid var(--accent);padding:8px 12px;border-radius:0 6px 6px 0;margin-top:10px}
+  .inline-confirm{background:var(--danger-soft);border:1px solid #f5cdcd;border-radius:var(--r);padding:10px 12px;margin-top:10px;display:none;font-size:13px}
+  .inline-confirm.on{display:block}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>APK Toolkit</div>
+    <div class="devsel" title="点击切换设备">
+      <span class="st"></span>
+      <span>华为平板 ELN2_W09 <span class="dim mono">AQLCCP5A23403810</span></span>
+      <span class="dim">▾</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="tb-btn" onclick="toast('已重新拉取设备与应用列表')">⟳ 刷新</button>
+    <button class="tb-btn" onclick="toast('命令日志抽屉：下方显示每条真实执行的 adb 命令')">⌨ 命令日志 <span class="badge">1</span></button>
+    <button class="tb-btn" onclick="go('settings')">⚙ 设置</button>
+  </div>
+
+  <div class="demo-bar">
+    <b>原型演示：</b>
+    <span class="dim">主控台 = 常驻界面；下面两个是「不需要常驻」的独立载体</span>
+    <button onclick="showPopup()">▶ 右键 .apk → 解析信息卡</button>
+    <button onclick="showConsole('ok')">▶ 双击 .apk → 安装控制台</button>
+    <button onclick="showConsole('fail')">▶ 安装失败场景</button>
+  </div>
+
+  <div class="body">
+    <nav class="nav">
+      <h5>本机 APK</h5>
+      <a href="#" data-p="parse"><span class="i">🔍</span>解析<span class="tag">本地</span></a>
+      <a href="#" data-p="analyze"><span class="i">📊</span>分析<span class="tag">本地</span></a>
+      <h5>设备</h5>
+      <a href="#" data-p="apps" class="on"><span class="i">📦</span>应用</a>
+      <a href="#" data-p="launcher"><span class="i">▶</span>启动器</a>
+      <a href="#" data-p="capture"><span class="i">📷</span>捕获</a>
+      <a href="#" data-p="install"><span class="i">⬇</span>安装</a>
+      <a href="#" data-p="files"><span class="i">📁</span>文件</a>
+      <h5>系统</h5>
+      <a href="#" data-p="menu"><span class="i">🖱</span>菜单注入</a>
+      <a href="#" data-p="settings"><span class="i">⚙</span>设置</a>
+    </nav>
+
+    <div class="main">
+
+      <!-- ============ 应用页 ============ -->
+      <section class="page on" id="p-apps">
+        <div class="pagehead"><h2>应用</h2><span class="chip acc">共 87 个 · 已过滤 3</span></div>
+        <div class="grid2">
+          <div>
+            <div class="searchrow">
+              <input type="text" id="q" placeholder="搜索包名或应用名，空格分词…" oninput="renderApps()">
+            </div>
+            <div class="searchrow" style="margin:-4px 0 8px">
+              <label class="dim" style="font-size:12.5px"><input type="checkbox" id="sys" onchange="renderApps()"> 含系统应用</label>
+              <span class="spacer"></span>
+              <span class="dim" style="font-size:12.5px">↓按安装时间</span>
+            </div>
+            <div class="list" id="appList"></div>
+          </div>
+          <div>
+            <div class="keybar">
+              <div style="flex:1;min-width:0">
+                <div class="pkg" id="kPkg">com.jxw.xwsf</div>
+                <div class="ver" id="kVer">⬤ 新网易词霸 &nbsp; v3.2.1 <span class="dim">(build 3210)</span></div>
+                <div class="meta">
+                  <span class="chip">targetSdk 35</span>
+                  <span class="chip">minSdk 24</span>
+                  <span class="chip">68.4 MB</span>
+                  <span class="chip">arm64-v8a</span>
+                  <span class="chip ok">用户应用</span>
+                </div>
+              </div>
+              <button onclick="toast('已复制包名 com.jxw.xwsf ✓')">📋 复制包名</button>
+            </div>
+
+            <div class="card">
+              <h4>操作</h4>
+              <div class="actions">
+                <button class="primary" onclick="go('launcher')">▶ 启动</button>
+                <button onclick="go('launcher')">▶ 启动指定组件</button>
+                <button onclick="toast('am force-stop com.jxw.xwsf ✓')">■ 强制停止</button>
+                <button class="danger" onclick="document.getElementById('cfm').classList.add('on')">🧹 清除数据</button>
+                <button class="danger" onclick="toast('已切换到卸载确认流程')">🗑 卸载</button>
+                <button onclick="toast('已导出到 output/com.jxw.xwsf_3.2.1.apk ✓')">⬇ 导出 APK</button>
+                <button onclick="toast('打开权限清单')">🔐 权限 (18)</button>
+              </div>
+              <div class="inline-confirm" id="cfm">
+                ⚠ 确认清除 <span class="mono">com.jxw.xwsf</span> 的全部数据？该操作不可撤销。<br>
+                <span class="dim" style="font-size:12.5px">输入包名以确认：</span>
+                <input type="text" placeholder="com.jxw.xwsf" style="width:220px;margin-top:6px">
+                <button class="danger" style="margin-top:6px" onclick="toast('已取消（原型不实际执行）');document.getElementById('cfm').classList.remove('on')">确认清除</button>
+                <button style="margin-top:6px" onclick="document.getElementById('cfm').classList.remove('on')">取消</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <h4>详情</h4>
+              <dl class="kv">
+                <dt>安装时间</dt><dd>2026-09-12 14:33</dd>
+                <dt>更新于</dt><dd>2026-09-17 09:02</dd>
+                <dt>安装路径</dt><dd class="mono" style="font-size:12.5px">/data/app/~~xY9kQ…/com.jxw.xwsf-1/base.apk</dd>
+                <dt>UID / 目标SDK</dt><dd>10231 &nbsp;/&nbsp; 35</dd>
+                <dt>数据目录</dt><dd>12.8 MB</dd>
+                <dt>请求权限</dt><dd class="mono" style="font-size:12.5px">18 项 <span style="color:var(--danger)">（3 项危险：相机 / 存储 / 定位）</span></dd>
+              </dl>
+            </div>
+
+            <div class="card" id="sigCard">
+              <h4 style="display:flex;align-items:center;gap:8px;font-weight:650">
+                签名
+                <span class="chip" id="sigChip" style="font-weight:400">加载中…</span>
+                <span class="spacer"></span>
+                <button class="ghost" style="font-size:12px;font-weight:400" onclick="loadSig(true)">🔄 重新拉取</button>
+              </h4>
+              <div id="sigBody"></div>
+              <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap">
+                <button style="font-size:12px" onclick="toast('已复制 SHA-256 ✓')">📋 复制 SHA-256</button>
+                <button style="font-size:12px" onclick="toast('已复制 com.jxw.xwsf 3.2.1 (3210) SHA-256:AB:CD:… ✓')">📋 复制签名摘要</button>
+                <button style="font-size:12px" onclick="cmpSig()">⚖ 与本机 APK 比对</button>
+                <button class="ghost" style="font-size:12px" onclick="loadSig(false,'blocked')">查看受限 ROM 表现</button>
+                <button class="ghost" style="font-size:12px" onclick="loadSig(false,'partial')">查看只拿到摘要的情况</button>
+              </div>
+              <div id="cmpBox" style="display:none;margin-top:10px;border:1px solid #f3ddb5;background:var(--warn-soft);border-radius:8px;padding:11px 13px;font-size:12.5px"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 启动器页 ============ -->
+      <section class="page" id="p-launcher">
+        <div class="pagehead"><h2>启动器</h2><span class="mono muted" style="font-size:13px">com.jxw.xwsf</span>
+          <span class="spacer"></span>
+          <button class="ghost" onclick="toast('我的入口：常调的 4 组参数，一键重发')">⭐ 我的入口</button>
+          <button class="ghost" onclick="toast('最近 50 条启动历史')">🕘 历史</button>
+        </div>
+
+        <div class="grid2" style="grid-template-columns:330px 1fr">
+          <div>
+            <div class="tabs">
+              <button class="on" onclick="tab(this,'activity')">Activity</button>
+              <button onclick="tab(this,'service')">Service</button>
+              <button onclick="tab(this,'broadcast')">广播</button>
+            </div>
+            <div class="searchrow"><input type="text" placeholder="过滤组件…" oninput="filterComp(this.value)"></div>
+            <div class="comp" id="compList"></div>
+            <div class="note">★ = 含 MAIN/LAUNCHER；灰显 = 未导出或已禁用，非 root 启动会失败</div>
+          </div>
+
+          <div>
+            <div class="card" style="padding:16px 18px">
+              <h4>启动参数</h4>
+              <div class="formrow">
+                <label>组件类型</label>
+                <div><label><input type="radio" name="ct" checked> Activity</label> &nbsp; <label><input type="radio" name="ct"> Service</label></div>
+                <label>组件</label>
+                <input class="mono" id="fComp" value="com.jxw.xwsf/.ui.WifiListActivity" style="font-size:12.5px">
+                <label>Action</label>
+                <select id="fAction" onchange="preview()">
+                  <option>android.intent.action.VIEW</option>
+                  <option>android.intent.action.MAIN</option>
+                  <option>android.intent.action.SEND</option>
+                  <option value="">（不指定）</option>
+                </select>
+                <label>Data URI</label>
+                <input class="mono" id="fData" value="xwsf://scan?ssid=test" style="font-size:12.5px">
+                <label>Category</label>
+                <div class="catrow" id="catRow" style="font-size:12.5px">
+                  <label><input type="checkbox" value="android.intent.category.DEFAULT" checked> DEFAULT</label>
+                  <label><input type="checkbox" value="android.intent.category.LAUNCHER"> LAUNCHER</label>
+                  <label><input type="checkbox" value="android.intent.category.BROWSABLE"> BROWSABLE</label>
+                  <label><input type="checkbox" value="android.intent.category.HOME"> HOME</label>
+                </div>
+                <label>Flags</label>
+                <div class="flagrow" id="flagRow" style="font-size:12.5px">
+                  <label><input type="checkbox" value="0x10000000" checked> NEW_TASK</label>
+                  <label><input type="checkbox" value="0x04000000"> CLEAR_TOP</label>
+                  <label><input type="checkbox" value="0x20000000"> SINGLE_TOP</label>
+                  <label><input type="checkbox" value="0x00008000"> CLEAR_TASK</label>
+                </div>
+              </div>
+              <div style="margin:12px 0 6px;display:flex;align-items:center;gap:10px">
+                <h4 style="margin:0">Extras</h4><span class="spacer"></span>
+                <button style="font-size:12.5px" onclick="addExtra()">+ 添加</button>
+              </div>
+              <div class="extras" id="extras">
+                <div class="er"><span class="mono dim">类型</span><span class="mono dim">key</span><span class="mono dim">value</span><span></span></div>
+                <div class="er"><select onchange="preview()"><option>string</option><option>int</option><option>bool</option><option>float</option><option>long</option><option>uri</option></select>
+                  <input value="ssid" oninput="preview()"><input value="test" oninput="preview()"><button class="ghost" onclick="this.parentNode.remove()">✕</button></div>
+                <div class="er"><select onchange="preview()"><option>bool</option><option>string</option><option>int</option></select>
+                  <input value="autoScan" oninput="preview()"><input value="true" oninput="preview()"><button class="ghost" onclick="this.parentNode.remove()">✕</button></div>
+                <div class="er"><select onchange="preview()"><option>int</option><option>string</option></select>
+                  <input value="timeout" oninput="preview()"><input value="5000" oninput="preview()"><button class="ghost" onclick="this.parentNode.remove()">✕</button></div>
+              </div>
+              <div style="margin-top:12px;font-size:13px;display:flex;gap:18px">
+                <label><input type="checkbox" id="fWait" checked onchange="preview()"> 计时 (-W)</label>
+                <label><input type="checkbox"> 启动后抓日志 3 秒</label>
+                <label class="dim"><input type="checkbox" disabled> 启动非导出组件（需 root）</label>
+              </div>
+            </div>
+
+            <div class="card">
+              <h4>将执行</h4>
+              <div class="preview" id="cmdPreview"></div>
+              <div class="launchbar">
+                <span class="dim" style="font-size:12.5px">界面上的命令与实际执行完全一致，可复制进你的 .sh 脚本</span>
+                <span class="spacer"></span>
+                <button onclick="toast('已复制命令 ✓')">复制命令</button>
+                <button onclick="toast('已导出为 exports/launch_wifilist.sh')">导出为 .sh</button>
+                <button class="primary" onclick="doLaunch()">▶ 启 动</button>
+              </div>
+              <div class="result" id="launchResult"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 捕获页 ============ -->
+      <section class="page" id="p-capture">
+        <div class="pagehead"><h2>捕获</h2>
+          <span class="mono dim" style="font-size:12.5px">D:\bat\apk-parser\captures</span>
+          <span class="spacer"></span>
+          <button onclick="toast('已打开产物目录')">打开目录</button>
+          <button onclick="toast('已清理 30 天前的产物（3 个）')">清理 30 天前</button>
+        </div>
+        <div class="capgrid">
+          <div class="card">
+            <h4>截图</h4>
+            <button class="primary" onclick="shot()">📷 立即截图</button>
+            <div class="shot" id="shotBox" style="margin-top:10px">点「立即截图」后这里显示预览</div>
+            <div class="actions" style="margin-top:10px">
+              <button onclick="toast('已另存为…')">另存为</button>
+              <button onclick="toast('已复制路径截图捕获')">复制路径</button>
+            </div>
+          </div>
+          <div class="card">
+            <h4>录屏</h4>
+            <div class="formrow" style="grid-template-columns:66px 1fr;font-size:12.5px">
+              <label>码率</label><select><option>8 Mbps</option><option>4 Mbps</option><option>16 Mbps</option></select>
+              <label>分辨率</label><select><option>原始</option><option>720x1280</option><option>1080x1920</option></select>
+              <label>时长上限</label><select><option>不限</option><option>180s</option><option>60s</option></select>
+            </div>
+            <label style="font-size:12.5px;display:block;margin:8px 0"><input type="checkbox"> 显示触摸点</label>
+            <div class="actions">
+              <button class="primary" id="recBtn" onclick="toggleRec()">⏺ 开始录屏</button>
+              <span class="rec" id="recTime" style="display:none">⏱ 00:42</span>
+            </div>
+            <div class="bar"><i id="recBar"></i></div>
+            <div class="dim" style="font-size:12px;margin-top:6px" id="recSize">录屏中… 4.2 MB</div>
+          </div>
+          <div class="card">
+            <h4>实时镜像</h4>
+            <button onclick="toast('已拉起 scrcpy（D:\\Program Files\\scrcpy\\scrcpy.exe）')">🖥 启动 scrcpy</button>
+            <label style="font-size:12.5px;display:block;margin-top:8px"><input type="checkbox"> 边镜像边录屏</label>
+            <div class="dim" style="font-size:12px;margin-top:8px">scrcpy 路径探测：<span class="mono">D:\Program Files\scrcpy\scrcpy-win64-v3.3.4</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>历史产物</h4>
+          <div class="artifact">🖼 <span class="mono">screenshot_20260918_110312.png</span><span class="dim">1.2 MB</span><span class="dim">11:03</span>
+            <span class="spacer"></span><button class="ghost">打开</button><button class="ghost">路径</button><button class="ghost">🗑</button></div>
+          <div class="artifact">🎬 <span class="mono">record_20260918_105840.mp4</span><span class="dim">18.4 MB</span><span class="dim">10:58</span>
+            <span class="spacer"></span><button class="ghost">播放</button><button class="ghost">路径</button><button class="ghost">🎞 GIF</button><button class="ghost">🗑</button></div>
+        </div>
+
+        <div class="card">
+          <h4>logcat &nbsp;<select style="font-size:12px"><option>V D I W E</option><option>只看 E</option></select>
+            <input placeholder="过滤: com.jxw.xwsf" style="margin-left:8px;font-size:12px;width:200px">
+            <label style="font-weight:400;color:var(--tx2);font-size:12.5px;margin-left:8px"><input type="checkbox" checked> 自动滚动</label>
+          </h4>
+          <div class="logbox">
+            <div>11:03:41.221 <span class="I">I/ActivityTaskManager:</span> START u0 {cmp=com.jxw.xwsf/.ui.WifiListActivity} from uid 10231</div>
+            <div>11:03:41.384 <span class="I">I/WifiService:</span> startScan uid=10231</div>
+            <div>11:03:41.512 <span class="E">E/AndroidRuntime: FATAL EXCEPTION: main  → 已捕获崩溃，是否导出？</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 安装页 ============ -->
+      <section class="page" id="p-install">
+        <div class="pagehead"><h2>安装</h2><span class="spacer"></span>
+          <button onclick="showConsole('ok')">打开 CLI 安装控制台</button></div>
+        <div class="grid2" style="grid-template-columns:1fr 1fr">
+          <div class="card">
+            <h4>安装参数</h4>
+            <div style="font-size:13.5px;display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">
+              <label><input type="checkbox" checked> -r 覆盖安装</label>
+              <label><input type="checkbox"> -d 允许降级</label>
+              <label><input type="checkbox" checked> -t 允许测试包</label>
+              <label><input type="checkbox"> -g 授予全部权限</label>
+              <label><input type="checkbox"> 装到 SD 卡</label>
+              <label><input type="checkbox"> --user 指定用户</label>
+            </div>
+            <div class="note">安装前会自动预检：minSdk / ABI / 同名签名 / 版本升降 —— 提前告警，不用等装完才知道失败。</div>
+          </div>
+          <div class="card">
+            <h4>批量与多机</h4>
+            <div class="actions">
+              <button onclick="toast('选择目录后逐个安装，显示 3/12 进度')">⬇ 批量安装目录</button>
+              <button onclick="toast('已勾选 2 台设备并发安装')">⇉ 多设备并发</button>
+              <button onclick="go('menu')">🖱 注册右键/双击</button>
+            </div>
+            <div class="bar" style="margin-top:12px"><i style="width:62%"></i></div>
+            <div class="dim" style="font-size:12.5px;margin-top:6px">正在安装 <span class="mono">app-jxwgb-release.apk</span> … <b>8 / 12</b></div>
+          </div>
+        </div>
+        <div class="card">
+          <h4>失败原因速查（INSTALL_FAILED_* 中文映射）</h4>
+          <dl class="kv" style="grid-template-columns:290px 1fr">
+            <dt class="mono" style="font-size:12px">VERSION_DOWNGRADE</dt><dd>设备上版本更高，不允许降级 → 加 <span class="mono">-d</span> 或先卸载</dd>
+            <dt class="mono" style="font-size:12px">UPDATE_INCOMPATIBLE</dt><dd>签名不一致，无法覆盖 → 先卸载（数据会丢）</dd>
+            <dt class="mono" style="font-size:12px">NO_MATCHING_ABIS</dt><dd>没有匹配的原生库 → 换对应 ABI 的包</dd>
+            <dt class="mono" style="font-size:12px">INSUFFICIENT_STORAGE</dt><dd>设备存储不足 → 清理空间</dd>
+            <dt class="mono" style="font-size:12px">TEST_ONLY</dt><dd>test-only 包 → 勾选 <span class="mono">-t</span></dd>
+          </dl>
+        </div>
+      </section>
+
+      <!-- ============ 文件 / 解析 / 分析 / 菜单 / 设置 ============ -->
+      <section class="page" id="p-files">
+        <div class="pagehead"><h2>文件与传输</h2></div>
+        <div class="card"><h4>push / pull</h4>
+          <div class="formrow">
+            <label>本地路径</label><input class="mono" value="D:\bat\apk-parser\captures\record_2026.mp4" style="font-size:12.5px">
+            <label>设备路径</label><input class="mono" value="/sdcard/Download/" style="font-size:12.5px">
+            <label></label><div><button onclick="toast('已 push 到设备')">⬆ push 到设备</button> <button onclick="toast('已 pull 到本机')">⬇ 从设备拉取</button></div>
+          </div>
+          <div class="note">录屏/截图的设备端产物会自动拉回本机，一般不必手动操作。</div>
+        </div>
+      </section>
+
+      <section class="page" id="p-parse">
+        <div class="pagehead"><h2>本机 APK 解析</h2><span class="chip">不需要连接设备</span></div>
+        <div class="card">
+          <h4>选择 APK</h4>
+          <div class="actions"><button class="primary" onclick="showPopup()">选择文件并解析</button><button onclick="toast('批量解析结果可排序、可导出 CSV')">批量解析目录</button></div>
+          <div class="note">右键资源管理器中的 <span class="mono">.apk</span> 是最快的入口；本页用于批量场景。</div>
+        </div>
+      </section>
+
+      <section class="page" id="p-analyze">
+        <div class="pagehead"><h2>APK 分析</h2><span class="chip">不需要连接设备</span></div>
+        <div class="card"><h4>双包对比</h4>
+          <div class="formrow">
+            <label>包 A</label><input class="mono" value="app-jxwgb-v3.2.0.apk" style="font-size:12.5px">
+            <label>包 B</label><input class="mono" value="app-jxwgb-v3.2.1.apk" style="font-size:12.5px">
+            <label></label><div><button class="primary" onclick="toast('差异：版本 3.2.0→3.2.1，体积 +1.2MB，新增权限 1 项，ABI 无变化')">开始对比</button></div>
+          </div>
+        </div>
+        <div class="card"><h4>与设备已装版本对比</h4>
+          <div class="dim" style="font-size:13px">选中本机 APK → 与设备上同名包比对，输出结论：<b>可升级 / 同级 / 降级 / 签名冲突</b></div>
+          <div class="actions" style="margin-top:10px"><button onclick="toast('结论：可升级（设备 v3.2.0 → APK v3.2.1）')">开始对比</button></div>
+        </div>
+      </section>
+
+      <section class="page" id="p-menu">
+        <div class="pagehead"><h2>菜单注入</h2><span class="chip ok">当前状态：✓ 已注册</span></div>
+        <div class="card">
+          <h4>注册项</h4>
+          <div class="switch"><span class="sw on" onclick="this.classList.toggle('on')"></span> 注册 APK 右键菜单（二级菜单「APK 工具」）</div>
+          <div class="switch"><span class="sw on" onclick="this.classList.toggle('on')"></span> 注册「打开方式」候选（双击可用本工具打开 .apk）</div>
+          <div class="switch"><span class="sw" onclick="this.classList.toggle('on')"></span> 设为 .apk 默认打开方式（双击直接安装）</div>
+          <div class="switch"><span class="sw" onclick="this.classList.toggle('on')"></span> 开机自动启动主控台</div>
+          <div class="actions" style="margin-top:10px">
+            <button class="primary" onclick="toast('已写入 HKCU 注册表，回读校验通过 ✓')">应用更改</button>
+            <button class="danger" onclick="toast('已逐条列出并删除本次写入的注册项')">全部卸载</button>
+          </div>
+          <div class="note">仅写 <span class="mono">HKCU</span>，不需要管理员权限；卸载时逐条列出后删除，可审计。</div>
+        </div>
+        <div class="card">
+          <h4>右键菜单预览</h4>
+          <div style="border:1px solid var(--line);border-radius:8px;width:250px;background:#fff;box-shadow:0 8px 22px rgba(15,23,42,.1);overflow:hidden;font-size:13px">
+            <div style="padding:7px 14px;border-bottom:1px solid var(--line2);color:var(--tx3);font-size:12px">app-jxwgb-release.apk</div>
+            <div style="padding:7px 14px">打开</div>
+            <div style="padding:7px 14px;background:var(--accent-soft);color:var(--accent);font-weight:600;display:flex;justify-content:space-between">APK 工具 <span>▸</span></div>
+            <div style="padding:6px 14px 8px 26px;color:var(--tx2);font-size:12.5px;line-height:1.9;background:#fafbfc">
+              解析 APK 信息<br>安装到设备<br>提取图标<br>复制包名<br>与已装版本对比<br>打开所在目录
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="p-settings">
+        <div class="pagehead"><h2>设置</h2></div>
+        <div class="card">
+          <h4>环境自检</h4>
+          <div class="doctor">
+            <span>adb</span><span><span class="g" style="color:var(--ok)">✓</span> D:\SDK\platform-tools\adb.exe &nbsp; 1.0.41</span>
+            <span>aapt2</span><span><span style="color:var(--ok)">✓</span> D:\SDK\build-tools\37.0.0\aapt2.exe</span>
+            <span>scrcpy</span><span><span style="color:var(--ok)">✓</span> D:\Program Files\scrcpy\scrcpy-win64-v3.3.4\scrcpy.exe</span>
+            <span>ffmpeg</span><span><span style="color:var(--danger)">✗</span> 未找到 &nbsp;→ 影响「录屏转 GIF」&nbsp; <a href="#" onclick="toast('已打开 ffmpeg 下载指引')">下载指引</a></span>
+            <span>python</span><span><span style="color:var(--ok)">✓</span> 3.13.12</span>
+          </div>
+          <div class="actions" style="margin-top:10px"><button onclick="toast('已重新检测')">重新检测</button></div>
+        </div>
+        <div class="card">
+          <h4>路径与端口</h4>
+          <div class="formrow">
+            <label>主控台端口</label><input value="5170" style="width:110px">
+            <label>产物目录</label><input class="mono" value="D:\bat\apk-parser\captures" style="font-size:12.5px">
+            <label>截图快捷键</label><input value="Ctrl+Shift+S" style="width:150px">
+            <label>服务访问</label><div style="font-size:13px"><label><input type="checkbox" checked> 仅本机 127.0.0.1</label></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ============ 轻弹窗：右键解析 ============ -->
+<div class="veil" id="veilPopup" onclick="if(event.target===this)hide('veilPopup')">
+  <div class="popup">
+    <div class="ph">
+      <span style="color:var(--ok)">✓</span><span class="t">解析成功</span>
+      <span class="spacer"></span>
+      <span class="mono dim" style="font-size:12px">app-jxwgb-release.apk</span>
+      <button class="ghost" onclick="hide('veilPopup')">✕</button>
+    </div>
+    <div class="pkhead">
+      <div class="pkg" style="font-size:21px">com.jxw.xwsf</div>
+      <div class="ver" style="margin-top:6px">⬤ 新网易词霸 &nbsp; v3.2.1 <span class="dim">(build 3210)</span></div>
+      <div class="meta">
+        <span class="chip acc">渠道 jxwgb</span><span class="chip">arm64-v8a</span><span class="chip">68.4 MB</span>
+        <span class="chip ok">正式签名 v1+v2</span><span class="chip">targetSdk 35</span>
+      </div>
+      <div class="actions" style="margin-top:11px">
+        <button onclick="toast('已复制包名 ✓')">📋 复制包名</button>
+        <button onclick="toast('已复制 com.jxw.xwsf 3.2.1')">📋 复制 包名+版本</button>
+      </div>
+    </div>
+    <div class="pb">
+      <div class="split">
+        <div>
+          <div class="pf"><span class="k">应用名</span><span>新网易词霸</span></div>
+          <div class="pf"><span class="k">最小 SDK</span><span class="mono">24 (Android 7.0)</span></div>
+          <div class="pf"><span class="k">目标 SDK</span><span class="mono">35 (Android 15)</span></div>
+          <div class="pf"><span class="k">入口 Activity</span><span class="mono" style="font-size:12px">.ui.MainActivity</span></div>
+          <div class="pf"><span class="k">原生库</span><span class="mono" style="font-size:12px">arm64-v8a (12 个 .so, 18.1 MB)</span></div>
+        </div>
+        <div>
+          <div class="pf"><span class="k">签名方案</span><span class="mono">v1 ✓ &nbsp; v2 ✓ &nbsp; v3 ✗</span></div>
+          <div class="pf"><span class="k">SHA-256</span><span class="mono" style="font-size:11.5px">A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90<br>A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:9F</span></div>
+          <div class="pf"><span class="k">证书有效期</span><span class="mono">2026-08-11 → 2046-08-11</span></div>
+          <div class="pf"><span class="k">组件数量</span><span>Activity 42 · Service 8 · Receiver 5 · Provider 2<br>
+            <span style="color:var(--warn)">⚠ 对外暴露(exported) 6 个</span></span></div>
+          <div class="pf"><span class="k">请求权限</span><span class="mono" style="font-size:12px">18 项
+            <span style="color:var(--danger)">（危险：相机 / 读写存储 / 定位）</span></span></div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <h4 style="font-size:13px;color:var(--tx2);margin:0 0 9px">体积构成</h4>
+        <div class="bar-item"><span>classes.dex</span><span class="b"><i style="width:56%"></i></span><span>38.2 MB</span></div>
+        <div class="bar-item" style="margin-top:6px"><span>lib/</span><span class="b"><i style="width:26%"></i></span><span>18.1 MB</span></div>
+        <div class="bar-item" style="margin-top:6px"><span>res/</span><span class="b"><i style="width:14%"></i></span><span>9.7 MB</span></div>
+        <div class="bar-item" style="margin-top:6px"><span>META-INF/</span><span class="b"><i style="width:4%"></i></span><span>2.4 MB</span></div>
+      </div>
+    </div>
+    <div class="popfoot">
+      <button class="primary" onclick="hide('veilPopup');showConsole('ok')">▶ 安装到设备</button>
+      <button onclick="toast('已提取 output/icon_com.jxw.xwsf.png ✓')">⬇ 提取图标</button>
+      <button onclick="toast('结论：设备已装 v3.2.0，可升级')">⚖ 与已装版本对比</button>
+      <button onclick="toast('已在资源管理器中定位')">📂 打开所在目录</button>
+      <span class="spacer"></span>
+      <span class="dim" style="font-size:12px;align-self:center">解析耗时 0.34s · 未联网</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 控制台：双击安装 ============ -->
+<div class="veil" id="veilConsole" onclick="if(event.target===this)hide('veilConsole')">
+  <div class="con">
+    <div class="ch">
+      <span class="d" style="background:#f87171"></span><span class="d" style="background:#fbbf24"></span><span class="d" style="background:#4ade80"></span>
+      <span style="margin-left:8px">APK 安装器 — apk-parser &nbsp;·&nbsp; cmd.exe</span>
+      <span class="spacer"></span>
+      <span id="conState" class="dimc">运行中…</span>
+    </div>
+    <pre id="conOut"></pre>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------------- 导航 ---------------- */
+const TITLES={apps:'应用',launcher:'启动器',capture:'捕获',install:'安装',files:'文件',parse:'解析',analyze:'分析',menu:'菜单注入',settings:'设置'};
+function go(p){
+  document.querySelectorAll('.page').forEach(e=>e.classList.remove('on'));
+  document.getElementById('p-'+p).classList.add('on');
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('on',a.dataset.p===p));
+  document.querySelector('.main').scrollTop=0;
+}
+document.querySelectorAll('.nav a').forEach(a=>a.onclick=e=>{e.preventDefault();go(a.dataset.p)});
+
+function toast(t){const el=document.getElementById('toast');el.textContent=t;el.classList.add('on');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('on'),1800)}
+function hide(id){document.getElementById(id).classList.remove('on')}
+
+/* ---------------- 应用列表 ---------------- */
+const APPS=[
+  {pkg:'com.jxw.xwsf',name:'新网易词霸',ver:'3.2.1',icon:'📘',sys:false},
+  {pkg:'com.jxw.xwsf.debug',name:'新网易词霸(测试)',ver:'3.2.1-dbg',icon:'🧪',sys:false},
+  {pkg:'com.tencent.mm',name:'微信',ver:'8.0.32',icon:'💬',sys:false},
+  {pkg:'com.android.settings',name:'设置',ver:'15',icon:'⚙️',sys:true},
+  {pkg:'com.jxw.school',name:'校园助手',ver:'1.8.0',icon:'🏫',sys:false},
+  {pkg:'com.android.adbkeyboard',name:'ADB Keyboard',ver:'2.0',icon:'⌨️',sys:false},
+  {pkg:'com.estrongs.android.pop',name:'ES 文件浏览器',ver:'4.4.3',icon:'📂',sys:false},
+  {pkg:'com.android.systemui',name:'系统界面',ver:'15',icon:'🎛',sys:true},
+];
+function hl(text,kws){let s=text;if(!kws.length)return s;
+  kws.forEach(k=>{s=s.replace(new RegExp('('+k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>')});return s}
+function renderApps(){
+  const q=document.getElementById('q').value.trim();
+  const showSys=document.getElementById('sys').checked;
+  const kws=q?q.split(/\s+/).filter(Boolean):[];
+  const box=document.getElementById('appList');
+  const list=APPS.filter(a=>{
+    if(!showSys&&a.sys)return false;
+    return kws.every(k=>a.pkg.toLowerCase().includes(k.toLowerCase())||a.name.toLowerCase().includes(k.toLowerCase()));
+  });
+  if(!list.length){box.innerHTML='<div style="padding:26px;text-align:center;color:var(--tx3);font-size:13px">没有匹配的应用<br><span style="font-size:12px">试试只输包名的一部分，或勾选「含系统应用」</span></div>';return}
+  box.innerHTML=list.map((a,i)=>`<div class="row ${i===0?'on':''}" onclick="pickApp(this,'${a.pkg}','${a.name}','${a.ver}')">
+      <span class="ico">${a.icon}</span>
+      <span style="min-width:0">
+        <div class="nm">${hl(a.pkg,kws)}</div>
+        <div class="sub">${hl(a.name,kws)} · v${a.ver}${a.sys?' · 系统应用':''}</div>
+      </span></div>`).join('');
+}
+function pickApp(el,pkg,name,ver){
+  document.querySelectorAll('#appList .row').forEach(r=>r.classList.remove('on'));el.classList.add('on');
+  document.getElementById('kPkg').textContent=pkg;
+  document.getElementById('kVer').innerHTML=`⬤ ${name} &nbsp; v${ver} <span class="dim">(build 3210)</span>`;
+  loadSig();
+}
+renderApps();
+
+/* ---------------- 组件列表 ---------------- */
+const COMPS={
+ activity:[
+  {n:'.ui.MainActivity',star:true},
+  {n:'.ui.WifiListActivity'},
+  {n:'.ui.SettingsActivity'},
+  {n:'.game.WordMatchGameActivity'},
+  {n:'.ui.StrengthenMarkWordsActivity'},
+  {n:'.ui.AboutActivity'},
+  {n:'.debug.TestActivity',bad:'未导出(exported=false)'},
+ ],
+ service:[
+  {n:'.service.SyncService'},
+  {n:'.service.DownloadService'},
+  {n:'.service.MediaPlayerService',bad:'未导出'},
+ ],
+ broadcast:[
+  {n:'android.intent.action.BOOT_COMPLETED'},
+  {n:'.receiver.PushReceiver',bad:'未导出'},
+ ]
+};
+function renderComps(type){
+  const box=document.getElementById('compList');
+  const list=COMPS[type]||[];
+  box.innerHTML=list.map(c=>`<div class="row ${c.bad?'dis':''}" onclick="pickComp('${c.n}')">
+      <span style="min-width:0">
+        <div class="cmp-name">${c.star?'<span class="star">★</span> ':''}com.jxw.xwsf/${c.n}</div>
+        ${c.bad?`<div class="sub" style="color:var(--warn)">⚠ ${c.bad}，非 root 启动会失败</div>`:''}
+      </span></div>`).join('')
+    + `<div class="grp">${type==='activity'?'以上为可启动 Activity':'以上为可启动组件'}</div>`;
+}
+function tab(btn,type){btn.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');renderComps(type)}
+function filterComp(v){
+  const kws=v.trim().split(/\s+/).filter(Boolean);
+  document.querySelectorAll('#compList .row').forEach(r=>{
+    r.style.display=kws.every(k=>r.textContent.toLowerCase().includes(k.toLowerCase()))?'':'none';
+  });
+}
+function pickComp(n){
+  document.getElementById('fComp').value='com.jxw.xwsf/'+n;
+  preview();toast('已填充组件，可直接编辑参数后启动');
+}
+renderComps('activity');
+
+/* ---------------- 命令预览 ---------------- */
+function esc(s){return /[\s|&<>^"]/.test(s)?'"'+s+'"':s}
+function checkedVals(sel){return [...document.querySelectorAll(sel+' input[type=checkbox]')].filter(c=>c.checked).map(c=>c.value)}
+function buildCmd(){
+  const comp=document.getElementById('fComp').value.trim();
+  const action=document.getElementById('fAction').value;
+  const data=document.getElementById('fData').value.trim();
+  const wait=document.getElementById('fWait').checked?' <span class="c2">-W</span>':'';
+  const cats=checkedVals('#catRow');
+  const flagVals=checkedVals('#flagRow');
+  let s='<span class="c1">adb</span> <span class="dimc">-s</span> AQLCCP5A23403810 <span class="c1">shell</span> <span class="c1">am</span> <span class="c1">start</span>'+wait;
+  if(comp) s+=' \\\n  <span class="c2">-n</span> '+comp;
+  if(action) s+=' \\\n  <span class="c2">-a</span> '+action;
+  if(data) s+=' \\\n  <span class="c2">-d</span> '+esc(data);
+  cats.forEach(c=>{s+=' \\\n  <span class="c2">-c</span> '+c});
+  if(flagVals.length){
+    const or=flagVals.map(v=>parseInt(v,16)).reduce((a,b)=>a|b,0);
+    s+=' \\\n  <span class="c2">-f</span> 0x'+(or>>>0).toString(16).padStart(8,'0');
+  }
+  document.querySelectorAll('#extras .er').forEach((r,idx)=>{
+    if(idx===0)return;
+    const t=r.children[0].value,k=r.children[1].value,v=r.children[2].value;
+    if(!k)return;
+    const m={string:'--es',int:'--ei',bool:'--ez',float:'--ef',long:'--el',uri:'--eu'}[t];
+    s+=' \\\n  <span class="c3">'+m+'</span> '+k+' '+esc(v);
+  });
+  document.getElementById('cmdPreview').innerHTML=s;
+}
+function preview(){buildCmd()}
+document.getElementById('fComp').addEventListener('input',preview);
+document.getElementById('fData').addEventListener('input',preview);
+document.getElementById('fWait').addEventListener('change',preview);
+document.querySelectorAll('#catRow input,#flagRow input').forEach(c=>c.addEventListener('change',preview));
+function addExtra(){
+  const box=document.getElementById('extras');
+  const d=document.createElement('div');d.className='er';
+  d.innerHTML='<select onchange="preview()"><option>string</option><option>int</option><option>bool</option><option>float</option><option>long</option><option>uri</option></select>'+
+              '<input placeholder="key" oninput="preview()"><input placeholder="value" oninput="preview()"><button class="ghost" onclick="this.parentNode.remove();preview()">✕</button>';
+  box.appendChild(d);
+}
+buildCmd();
+
+function doLaunch(){
+  const r=document.getElementById('launchResult');
+  r.className='result ok show';
+  r.innerHTML='<b>✅ 启动成功</b> &nbsp; TotalTime <span class="mono">312ms</span> &nbsp; WaitTime <span class="mono">318ms</span>'+
+    '<div class="hint" style="margin-top:8px">已记录到启动历史 &nbsp;·&nbsp; '+
+    '<button class="ghost" style="font-size:12.5px">查看日志</button> '+
+    '<button class="ghost" style="font-size:12.5px">再启一次</button> '+
+    '<button class="ghost" style="font-size:12.5px">存为「我的入口」</button></div>';
+}
+
+/* ---------------- 签名区块：两级加载 ---------------- */
+let sigTimers=[];
+const SIG_SK = `<dl class="kv" style="grid-template-columns:88px 1fr">
+  <dt>签名方案</dt><dd><span class="sk" style="min-width:56px"></span></dd>
+  <dt>证书主题</dt><dd><span class="sk"></span></dd>
+  <dt>SHA-256</dt><dd><span class="sk" style="min-width:300px"></span></dd>
+  <dt>有效期</dt><dd><span class="sk" style="min-width:190px"></span></dd>
+  <dt>类型</dt><dd><span class="sk" style="min-width:120px"></span></dd>
+</dl>`;
+const sigFastRows = `<dl class="kv" style="grid-template-columns:88px 1fr">
+  <dt>签名方案</dt><dd>v2 ✓ &nbsp;<span class="dim">apkSigningVersion=2</span></dd>
+  <dt>签名标识</dt><dd class="mono">da3a4721 <span class="dim">（dumpsys 的 signatures 哈希，可用于快速判同）</span></dd>
+  <dt>证书主题</dt><dd><span class="sk"></span></dd>
+  <dt>SHA-256</dt><dd><span class="sk" style="min-width:300px"></span></dd>
+  <dt>有效期</dt><dd><span class="sk" style="min-width:190px"></span></dd>
+</dl>`;
+const sigFullRows = `<dl class="kv" style="grid-template-columns:88px 1fr">
+  <dt>签名方案</dt><dd>v2 ✓ &nbsp;<span class="dim">apkSigningVersion=2 · 无 past signatures</span></dd>
+  <dt>签名标识</dt><dd class="mono">da3a4721</dd>
+  <dt>证书主题</dt><dd class="mono" style="font-size:12.5px">CN=jxw, O=jxw, C=CN</dd>
+  <dt>SHA-256</dt><dd class="mono" style="font-size:11.5px">A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:9F</dd>
+  <dt>SHA-1</dt><dd class="mono" style="font-size:11.5px">3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D</dd>
+  <dt>有效期</dt><dd>2024-03-01 → 2054-03-01 &nbsp;<span class="dim">RSA 2048</span></dd>
+  <dt>类型</dt><dd><span class="chip ok">用户签名（非 debug）</span></dd>
+</dl>`;
+function loadSig(force,mode){
+  sigTimers.forEach(clearTimeout);sigTimers=[];
+  const body=document.getElementById('sigBody'),chip=document.getElementById('sigChip');
+  document.getElementById('cmpBox').style.display='none';
+  chip.className='chip';
+
+  if(mode==='blocked'){
+    chip.textContent='不可得';chip.className='chip bad';
+    body.innerHTML=`<div class="sigerr">
+      <b>该设备不支持免 root 读取已安装应用签名</b>
+      <div style="margin-top:5px;color:var(--tx2)">未申请 root，已停止。以下是失败在哪一步的原始依据：</div>
+      <details class="why"><summary>查看原因</summary>
+        <div class="mono" style="margin-top:6px;color:var(--tx2);font-size:11.5px;line-height:1.9">
+          ① adb shell dumpsys package com.jxw.xwsf → 无 apkSigningVersion / signatures 字段<br>
+          ② adb shell pm path com.jxw.xwsf → package:/data/app/…/base.apk（路径可得）<br>
+          ③ adb pull /data/app/…/base.apk → error: failed to stat remote object: Permission denied
+        </div></details>
+      <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap">
+        <button style="font-size:12px" onclick="toast('已复制三条命令，可自行排查')">复制命令自查</button>
+        <button style="font-size:12px" onclick="go('parse')">改为查看本机 APK 签名</button>
+      </div></div>`;
+    return;
+  }
+  if(mode==='partial'){
+    chip.textContent='仅摘要';chip.className='chip warn';
+    body.innerHTML=sigFastRows+
+      `<div class="fpath">完整证书信息不可得（无法读取设备端 base.apk）
+        &nbsp;·&nbsp; <a href="#" onclick="toast('已重试，仍失败');return false">重试</a>
+        &nbsp;·&nbsp; <a href="#" onclick="go('parse');return false">改为查看本机 APK 签名</a></div>`;
+    return;
+  }
+
+  chip.textContent='加载中…';body.innerHTML=SIG_SK;
+  sigTimers.push(setTimeout(()=>{
+    chip.textContent='快路径已就绪 · 正在拉取完整证书…';chip.className='chip warn';
+    body.innerHTML=sigFastRows+'<div class="fpath">adb pull base.apk … <span id="sigProg">28%</span> &nbsp;<a href="#" onclick="toast(\'已跳过拉取，摘要仍保留\');return false">跳过</a></div>';
+    let p=28;const iv=setInterval(()=>{p=Math.min(100,p+13);
+      const el=document.getElementById('sigProg');if(el)el.textContent=p+'%';else clearInterval(iv);
+      if(p>=100)clearInterval(iv);},120);
+    sigTimers.push(setTimeout(()=>clearInterval(iv),1500));
+  },420));
+  sigTimers.push(setTimeout(()=>{
+    chip.textContent='完整信息已就绪 · 1.4s';chip.className='chip ok';
+    body.innerHTML=sigFullRows+
+      `<div class="fpath">来源 设备端 base.apk（免 root · 约 35 MB/s） · 来自缓存 刚刚
+        · 与「导出已装 APK」共用同一次下载</div>`;
+  },1750));
+}
+function cmpSig(){
+  const b=document.getElementById('cmpBox');b.style.display='block';
+  b.innerHTML=`<b>⚠ 不同签名</b>
+    <table style="width:100%;margin-top:8px;font-size:12px;border-collapse:collapse">
+      <tr><td style="color:var(--tx2);width:70px"></td><td>设备已装 com.jxw.xwsf</td><td>本机 app-jxwgb-release.apk</td></tr>
+      <tr><td style="color:var(--tx2)">签名标识</td><td class="mono">da3a4721</td><td class="mono">7f2b1c04</td></tr>
+      <tr><td style="color:var(--tx2)">SHA-256</td><td class="mono" style="font-size:11px;color:var(--danger)">A1:B2:C3…:9F</td><td class="mono" style="font-size:11px;color:var(--danger)">C3:D4:E5…:71</td></tr>
+      <tr><td style="color:var(--tx2)">证书主题</td><td class="mono" style="font-size:11px">CN=jxw, O=jxw</td><td class="mono" style="font-size:11px">CN=AndroidDebug</td></tr>
+      <tr><td style="color:var(--tx2)">判定依据</td><td colspan="2">签名标识与 SHA-256 均不一致</td></tr>
+    </table>
+    <div style="margin-top:8px;color:var(--tx2)">可能原因：设备上是另一个渠道/调试包，或使用了不同 keystore 签名</div>
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <button style="font-size:12px" onclick="toast('已复制对比结果')">📋 复制对比结果</button>
+      <button style="font-size:12px" onclick="toast('已在资源管理器中定位该 APK')">📂 打开该 APK 所在目录</button></div>`;
+}
+loadSig();
+
+/* ---------------- 截图 / 录屏 ---------------- */
+function shot(){
+  const b=document.getElementById('shotBox');
+  b.innerHTML='<img alt="截图预览" style="max-width:100%;max-height:140px;border-radius:6px" src="data:image/svg+xml;utf8,'+
+    encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="150"><rect width="240" height="150" fill="#eef2f7"/><rect x="0" y="0" width="240" height="20" fill="#2563eb"/><text x="8" y="14" font-size="11" fill="#fff">WifiList</text><rect x="12" y="36" width="216" height="16" rx="3" fill="#fff" stroke="#cbd5e1"/><rect x="12" y="60" width="150" height="16" rx="3" fill="#fff" stroke="#cbd5e1"/><rect x="12" y="86" width="216" height="1" fill="#e2e8f0"/><text x="12" y="104" font-size="10" fill="#64748b">XWSF-Test-5G</text><text x="12" y="126" font-size="10" fill="#64748b">XWSF-Guest</text><text x="200" y="142" font-size="9" fill="#94a3b8">11:03</text></svg>')+'">';
+  toast('截图已保存 captures/screenshot_20260918_110312.png ✓');
+}
+let recT=null,recSec=0;
+function toggleRec(){
+  const btn=document.getElementById('recBtn'),t=document.getElementById('recTime'),bar=document.getElementById('recBar');
+  if(recT){clearInterval(recT);recT=null;btn.textContent='⏺ 开始录屏';t.style.display='none';bar.style.width='0';
+    toast('录屏已保存 captures/record_20260918_110840.mp4（18.4 MB）✓ 已自动拉回本机');return}
+  recSec=0;btn.textContent='⏹ 停止并保存';t.style.display='';t.textContent='⏱ 00:00';bar.style.width='6%';
+  recT=setInterval(()=>{recSec++;t.textContent='⏱ 00:'+String(recSec).padStart(2,'0');bar.style.width=Math.min(100,6+recSec*3)+'%';},1000);
+}
+
+/* ---------------- 轻弹窗 & 控制台 ---------------- */
+function showPopup(){document.getElementById('veilPopup').classList.add('on')}
+function showConsole(mode){
+  document.getElementById('veilPopup').classList.remove('on');
+  document.getElementById('veilConsole').classList.add('on');
+  const out=document.getElementById('conOut');out.innerHTML='';
+  const st=document.getElementById('conState');
+  st.textContent='运行中…';st.className='dimc';
+  const L=[
+    ['<span class="cy">================================================================</span>',''],
+    ['  <span class="w">APK 安装器</span>  —  apk-parser',''],
+    ['<span class="cy">================================================================</span>',''],
+    ['  文件:  D:\\build\\out\\app-jxwgb-release.apk','120'],
+    ['  解析:  com.jxw.xwsf  v3.2.1 (3210)   targetSdk 35   arm64-v8a','180'],
+    ['  设备:  华为平板 ELN2_W09 (AQLCCP5A23403810)  Android 15','120'],
+    ['<span class="dimc">----------------------------------------------------------------</span>','90'],
+    ['  预检:  <span class="g">✓</span> minSdk 24 ≤ 设备 35      <span class="g">✓</span> ABI 匹配','260'],
+    ['         <span class="y">⚠</span> 设备已装 v3.2.0 (3210)  → 将覆盖安装','200'],
+    ['<span class="dimc">----------------------------------------------------------------</span>','90'],
+    ['  <span class="b">&gt;</span> adb -s AQLCCP5A23403810 install -r -t "D:\\build\\out\\app-jxwgb-release.apk"','300'],
+  ];
+  const FILL=['<span class="dimc">----------------------------------------------------------------</span>',
+    '  正在推送安装包...  [<span class="g">████████████</span><span class="dimc">░░░░░░░░</span>]  62%  28.4/45.8 MB',
+    '  正在安装...         [<span class="g">████████████████████</span>] 100%'];
+  const OK=['<span class="dimc">----------------------------------------------------------------</span>',
+    '  <span class="g">✅ 安装成功</span>  耗时 12.3s',
+    '     设备上版本: v3.2.1 (3210)         [<span class="b">L</span>] 查看日志  [<span class="b">O</span>] 打开应用',
+    '<span class="dimc">----------------------------------------------------------------</span>',
+    '  按任意键关闭窗口... <span class="cursor"></span>'];
+  const FAIL=['<span class="dimc">----------------------------------------------------------------</span>',
+    '  <span class="r">❌ 安装失败</span>  耗时 4.1s',
+    '     错误码: <span class="r">INSTALL_FAILED_VERSION_DOWNGRADE</span>',
+    '     含义:   设备上已装版本更高，系统不允许降级安装',
+    '     建议:   允许降级安装（加 -d），或先卸载旧版本',
+    '<span class="dimc">----------------------------------------------------------------</span>',
+    '  [<span class="b">D</span>] 带 -d 允许降级重试     [<span class="b">U</span>] 先卸载再安装     [<span class="b">C</span>] 复制命令     [其他] 关闭',
+    '  <span class="g">&gt;</span> <span class="cursor"></span>'];
+  let i=0;
+  (function step(){
+    if(i<L.length){out.innerHTML+=L[i][0]+'\n';out.scrollTop=out.scrollHeight;const d=parseInt(L[i][1])||100;i++;setTimeout(step,d);return}
+    // phase 2: progress
+    let j=0;
+    (function fill(){
+      if(j<FILL.length){out.innerHTML+=FILL[j]+'\n';out.scrollTop=out.scrollHeight;j++;setTimeout(fill,j===1?500:700);return}
+      const end=mode==='fail'?FAIL:OK;
+      let k=0;
+      (function fin(){
+        if(k<end.length){out.innerHTML+=end[k]+'\n';out.scrollTop=out.scrollHeight;k++;setTimeout(fin,220);return}
+        st.textContent=mode==='fail'?'失败':'成功';st.className=mode==='fail'?'r':'g';
+      })();
+    })();
+  })();
+}
+</script>
+</body>
+</html>
