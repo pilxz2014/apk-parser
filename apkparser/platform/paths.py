@@ -25,7 +25,16 @@ APP_NAME = "apk-parser"
 # ---------------------------------------------------------------- 项目根
 
 def project_root() -> Path:
-    """项目根目录（apkparser/platform/paths.py → 上溯三层）。"""
+    """项目根目录（apkparser/platform/paths.py → 上溯三层）。
+
+    打包后（PyInstaller frozen）没有源码树，产物/缓存/日志目录改为：
+      Windows : exe 同级目录（便携式布局 —— 把程序文件夹放哪，数据就在哪）
+      mac/Linux: 用户级数据目录（.app 包内不可写也不该写）
+    """
+    if getattr(sys, "frozen", False):
+        if IS_WINDOWS:
+            return Path(sys.executable).resolve().parent
+        return _ensure(config_dir() / "data")
     return Path(__file__).resolve().parents[2]
 
 

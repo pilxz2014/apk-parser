@@ -9,6 +9,8 @@ _probe.txt
 # 打包产物
 build/
 dist/
+APKConsole.spec
+assets/
 
 # Python
 __pycache__/

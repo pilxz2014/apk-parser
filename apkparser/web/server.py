@@ -25,7 +25,22 @@ from .. import config
 from ..platform import paths, shell
 from . import routes
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+def _static_dir() -> Path:
+    """静态资源目录。
+
+    源码运行：跟本模块同级。打包后（PyInstaller onedir）：数据文件按
+    apkparser/web/static 的包路径落在 _MEIPASS 下，模块 __file__ 也在同一棵
+    目录树里，正常解析得到同一个位置；两个都试一遍，谁存在用谁。
+    """
+    here = Path(__file__).resolve().parent / "static"
+    if here.is_dir():
+        return here
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", ".")) / "apkparser" / "web" / "static"
+    return here
+
+
+STATIC_DIR = _static_dir()
 MAX_BODY = 64 * 1024 * 1024
 
 
@@ -577,8 +592,39 @@ def request_shutdown() -> dict:
         time.sleep(0.3)
         os._exit(0)
 
+
     threading.Thread(target=_later, daemon=True).start()
     return {"ok": True, "detail": "主控台正在停止"}
+
+
+def stop_local() -> dict:
+    """停止**本进程内**的服务，但不退出进程（托盘「停止服务 / 退出」用）。
+
+    与 request_shutdown() 的区别：后者是为 HTTP 请求应答设计的，会用
+    os._exit(0) 直接干掉整个进程 —— 托盘进程还得活着显示图标，不能用它。
+    """
+    global _server
+    httpd = _server
+    if httpd is None:
+        return {"ok": False, "detail": "当前进程没有在跑服务"}
+    _server = None
+    try:
+        httpd.shutdown()
+    except Exception:
+        pass
+    try:
+        httpd.server_close()
+    except Exception:
+        pass
+    _cleanup()
+    return {"ok": True, "detail": "服务已停止"}
+
+
+def restart_local(port: int = 0, open_browser: bool = False) -> dict:
+    """托盘「重启服务」：进程内先停再起，端口语义与  一致。"""
+    stop_local()
+    time.sleep(0.2)            # Windows 上 socket 归还稍微缓一口气，配合 reuse_address 兜底
+    return start(port=port, open_browser=open_browser, foreground=False)
 
 
 def _kill_pid(pid: int) -> bool:

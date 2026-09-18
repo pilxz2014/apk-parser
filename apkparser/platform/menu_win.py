@@ -206,7 +206,7 @@ def install(project_root: Path = None, style: str = STYLE_CASCADE) -> Dict:
 
 
 def _install_cascade(root: Path, steps: List[str], missing: List[str]) -> None:
-    """级联样式：一个「APK 工具」菜单，子项在它的 shell 子键下。
+    r"""级联样式：一个「APK 工具」菜单，子项在它的 shell 子键下。
 
     ⚠ 这里是最容易写错的地方，官方文档（Creating Static Cascading Menus）
       给了三条硬性要求：
