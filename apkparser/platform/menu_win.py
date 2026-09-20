@@ -150,7 +150,8 @@ def _del_tree(root: str) -> bool:
 
 
 def _script(name: str) -> Path:
-    return paths.project_root() / name
+    # 平台脚本统一住在 scripts/ 下（根目录只留 start/stop 这类主入口）
+    return paths.project_root() / paths.SCRIPTS_DIRNAME / name
 
 
 # ---------------------------------------------------------------- 安装
@@ -189,7 +190,7 @@ def install(project_root: Path = None, style: str = STYLE_CASCADE) -> Dict:
         _install_cascade(root, steps, missing)
 
     # 打开方式候选（不设默认）
-    _set(PROGID_ROOT + r"\shell\open\command", "", "", '"%s" "%%1"' % (root / "apk-install.cmd"))
+    _set(PROGID_ROOT + r"\shell\open\command", "", "", '"%s" "%%1"' % (root / paths.SCRIPTS_DIRNAME / "apk-install.cmd"))
     _set(PROGID_ROOT, "", "", "APK 安装到设备")
     # REG_NONE 只接受 bytes —— 传 str 同样抛 ValueError
     # 注意：CPython 的 winreg **根本不支持写 REG_NONE**（Py2Reg 无此分支，
@@ -235,7 +236,7 @@ def _install_cascade(root: Path, steps: List[str], missing: List[str]) -> None:
 
     # Explorer 按**键名的字典序**枚举 shell 下的子键，所以用 01/02/… 定顺序
     for sub, label, script in ITEMS:
-        sfile = root / script
+        sfile = root / paths.SCRIPTS_DIRNAME / script
         if not sfile.is_file():
             missing.append(script)
         subkey = "%s\\shell\\%s" % (MENU_ROOT, sub)
@@ -252,7 +253,7 @@ def _install_cascade(root: Path, steps: List[str], missing: List[str]) -> None:
     console_key = "%s\\shell\\%s" % (MENU_ROOT, sub)
     _set(console_key, "", "MUIVerb", label)
     _set(console_key, "", "CommandFlags", 0x20, winreg.REG_DWORD)
-    _set(console_key + "\\command", "", "", '"%s" "%%1"' % (root / script))
+    _set(console_key + "\\command", "", "", '"%s" "%%1"' % (root / paths.SCRIPTS_DIRNAME / script))
     steps.append("  └ %s（含分隔线标志）" % label)
 
 
@@ -262,7 +263,7 @@ def _install_flat(root: Path, steps: List[str], missing: List[str]) -> None:
     不依赖任何级联解析机制，顶级静态 verb 的可见性是确定的。
     """
     for sub, label, script in all_items():
-        sfile = root / script
+        sfile = root / paths.SCRIPTS_DIRNAME / script
         if not sfile.is_file():
             missing.append(script)
         key = "%s\\%s%s" % (FLAT_ROOT, FLAT_KEY_PREFIX, sub)

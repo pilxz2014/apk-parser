@@ -87,7 +87,7 @@ def install(project_root: Path = None) -> Dict:
     missing: List[str] = []
 
     for label, script in ACTIONS:
-        sfile = root / script
+        sfile = root / paths.SCRIPTS_DIRNAME / script
         if not sfile.is_file():
             missing.append(script)
         wf = SERVICES_DIR / ("%s.workflow" % label)

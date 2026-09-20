@@ -60,7 +60,7 @@ def install(project_root: Path = None) -> Dict:
 
     ACTIONS_DIR.mkdir(parents=True, exist_ok=True)
     for key, label, script, _icon in ITEMS:
-        sfile = root / script
+        sfile = root / paths.SCRIPTS_DIRNAME / script
         if not sfile.is_file():
             missing.append(script)
         try:
@@ -76,7 +76,7 @@ def install(project_root: Path = None) -> Dict:
         NAUTILUS_DIR.mkdir(parents=True, exist_ok=True)
         for key, label, script, _icon in ITEMS:
             dest = NAUTILUS_DIR / ("APK 工具 - %s" % label)
-            dest.write_text('#!/bin/bash\nexec "%s" "$@"\n' % (root / script), encoding="utf-8")
+            dest.write_text('#!/bin/bash\nexec "%s" "$@"\n' % (root / paths.SCRIPTS_DIRNAME / script), encoding="utf-8")
             dest.chmod(0o755)
         steps.append("生成 Nautilus 脚本：%s（GNOME Files 用）" % NAUTILUS_DIR)
     except OSError as e:

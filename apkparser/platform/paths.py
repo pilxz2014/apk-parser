@@ -21,6 +21,10 @@ IS_LINUX = sys.platform.startswith("linux")
 
 APP_NAME = "apk-parser"
 
+# 右键菜单 / 打开方式用的平台脚本（.cmd / .sh）统一住在 scripts/ 下，
+# 根目录只留 start/stop 这类「一键启停主程序」的入口。
+SCRIPTS_DIRNAME = "scripts"
+
 
 # ---------------------------------------------------------------- 项目根
 
@@ -289,8 +293,8 @@ def folder_of(path) -> dict:
 
 
 def find_sibling_script(name: str) -> Path:
-    """项目根下的 .cmd/.sh 脚本路径。"""
-    return project_root() / name
+    """scripts/ 下的平台脚本路径（右键菜单等外部入口都指到这里）。"""
+    return project_root() / SCRIPTS_DIRNAME / name
 
 
 def which_all(*names: str):

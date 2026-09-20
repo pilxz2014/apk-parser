@@ -18,4 +18,4 @@ if [ -z "$PY" ]; then
 fi
 
 export PYTHONUTF8=1
-exec "$PY" "$HERE/apktool.py" "$@"
+exec "$PY" "$HERE/../apktool.py" "$@"

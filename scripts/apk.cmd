@@ -21,5 +21,5 @@ if errorlevel 1 (
   set "PY=py -3"
 )
 set "PYTHONUTF8=1"
-%PY% "%HERE%apktool.py" %*
+%PY% "%HERE%..\apktool.py" %*
 exit /b %ERRORLEVEL%
