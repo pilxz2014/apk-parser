@@ -212,6 +212,36 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
 .check { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12.5px; }
 .check input { width: auto; }
 
+/* Activity 堆栈（device.stack）
+
+ 字段用「中文标签 + 值」的网格排 —— 一行的信息量比竖排的 kv 表大，
+ 而标签固定宽度能让值左对齐成一列，扫起来快。
+ */
+
+.stack-fields {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 6px 20px;
+}
+.stack-field { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
+.stack-fk { color: var(--dim); font-size: 12px; text-align: right; cursor: help; }
+.stack-fv { font-size: 12.5px; word-break: break-all; }
+.stack-fv.mono { font-family: var(--mono); font-size: 12px; }
+
+.stack-task-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stack-id, .stack-idx { color: var(--ink-2); font-weight: 600; }
+.stack-aff { color: var(--ink); font-weight: 650; }
+.stack-dim { color: var(--dim); font-size: 12px; }
+.stack-sp { flex: 1 1 auto; }
+
+.stack-act {
+  border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 9px 11px; margin: 8px 0; background: var(--panel-2);
+}
+/* 正在前台跑的那个：一眼看到绿色块就知道"是它" */
+.stack-act.on { border-color: #c9e6d7; background: var(--ok-soft); }
+.stack-act-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 7px; }
+.stack-comp { font-size: 12.5px; word-break: break-all; }
+
 /* 键值表 */
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; }
 .kv dt { color: var(--dim); font-size: 12.5px; }

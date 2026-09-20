@@ -26,6 +26,7 @@ from ..core.device import adb as adb_mod
 from ..core.device import apps as apps_mod
 from ..core.device import labels as labels_mod
 from ..core.device import signature as sign_mod
+from ..core.device import stack as stack_mod
 from ..core.device import tools as dev_tools
 from ..core.install import errors as err_mod
 from ..core.install import installer
@@ -247,6 +248,24 @@ def h_device_info(ctx):
 @route("POST", r"/api/devices/restart-adb")
 def h_restart_adb(ctx):
     return adb_mod.adb_server_restart()
+
+
+# ---------------------------------------------------------------- Activity 堆栈
+
+@route("GET", r"/api/device/stack")
+@route("POST", r"/api/device/stack")
+def h_device_stack(ctx):
+    """当前设备的 Activity 堆栈（结构化）。
+
+    原始 `dumpsys activity activities` 在真机上是 480 行 / 36KB，人读不动；
+    这里返回拆好的 display → task → activity 三层，字段名见响应里的
+    `fields`（中文标签 + 说明），前端直接拿它渲染，不用再翻译一遍。
+
+    `refresh=1` 强制重新 adb（默认 3 秒内的结果复用，防重复点击刷出一串调用）。
+    """
+    device = ctx.field("device", None) or ctx.q("device")
+    refresh = ctx.qb("refresh", False) or bool(ctx.field("refresh", False))
+    return stack_mod.snapshot(device=device or "", refresh=refresh)
 
 
 # ---------------------------------------------------------------- 已装应用
@@ -1333,6 +1352,8 @@ def _pid() -> int:
 
 def _script_state() -> List[dict]:
     root = paths.project_root()
+    # 根目录只留一键启停这几个主入口，其余平台脚本都收在 scripts/ 下
+    root_only = {"start.bat", "stop.bat", "run-web.cmd", "stop-web.cmd"}
     out = []
     for name, desc in (
         ("apk-info.cmd", "解析信息（右键）"),
@@ -1346,7 +1367,7 @@ def _script_state() -> List[dict]:
         ("start.bat", "一键启动（restart 语义）"),
         ("stop.bat", "一键停止"),
     ):
-        f = root / name
+        f = root / name if name in root_only else root / paths.SCRIPTS_DIRNAME / name
         out.append({"name": name, "desc": desc, "exists": f.is_file(), "path": str(f)})
     return out
 

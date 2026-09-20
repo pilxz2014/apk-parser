@@ -2027,6 +2027,206 @@ async function showDeviceDetail(serial) {
   } catch (e) { body.innerHTML = ''; body.appendChild(notice('bad', e.message)); }
 }
 
+/* ------------------------------------------------ 字段标签（后端给中文名）
+
+ 后端 `stack.FIELDS` 里存着每个字段的**中文标签和说明**，响应里一起带过来。
+ 前端不再自己翻译一遍 —— 加字段只改后端一处，界面跟着变。
+ */
+
+function fLabel(fields, key) {
+  const f = (fields || {})[key];
+  return (f && f.label) || key;
+}
+
+function fHint(fields, key) {
+  const f = (fields || {})[key];
+  return (f && f.hint) || '';
+}
+
+/** 一格「中文标签 + 值」。标签带 title —— 悬停就看这字段到底是啥。 */
+function fCell(fields, key, value, mono) {
+  if (value === '' || value == null || value === false) return null;
+  return el('div', { class: 'stack-field' },
+    el('div', { class: 'stack-fk', title: fHint(fields, key) }, fLabel(fields, key)),
+    el('div', { class: 'stack-fv' + (mono ? ' mono' : '') }, String(value)));
+}
+
+function yn(b) { return b ? '是' : '否'; }
+
+function stateTag(a) {
+  const s = (a.state || '').toUpperCase();
+  const kind = s === 'RESUMED' ? 'ok' : (s === 'PAUSED' ? 'warn' : 'plain');
+  return tag(a.stateText || a.state || '-', kind);
+}
+
+VIEWS['device.stack'] = async function (host, cap, q) {
+  const kw = el('input', { type: 'search', placeholder: '按包名 / 类名过滤…', value: q.filter || '' });
+  const visOnly = el('input', { type: 'checkbox' });
+  const out = el('div');
+  let data = null;
+
+  host.appendChild(card('当前设备堆栈',
+    '把 dumpsys activity activities 拆成「屏幕 → 任务 → Activity」三层；每个字段的中文名悬停可看说明',
+    el('div', { class: 'row' },
+      el('div', { class: 'grow' }, kw),
+      el('label', { class: 'check' }, visOnly, '只看可见任务'),
+      el('button', { class: 'btn primary', onclick: () => load(false) }, '刷新'),
+      el('button', { class: 'btn', onclick: () => load(true) }, '强制重读'))));
+  host.appendChild(out);
+
+  kw.addEventListener('input', () => { if (data) paint(); });
+  visOnly.addEventListener('change', () => { if (data) paint(); });
+
+  async function load(force) {
+    out.innerHTML = '';
+    out.appendChild(spinner('读取设备堆栈…'));
+    try {
+      data = await api('/api/device/stack', {
+        params: { device: devParam(), refresh: force ? '1' : '' },
+      });
+      paint();
+    } catch (e) {
+      data = null;
+      out.innerHTML = '';
+      out.appendChild(notice('bad', e.message));
+    }
+  }
+
+  function hits(text) {
+    const k = kw.value.trim().toLowerCase();
+    if (!k) return true;
+    return String(text || '').toLowerCase().indexOf(k) >= 0;
+  }
+
+  function paint() {
+    const r = data;
+    out.innerHTML = '';
+    if (!r || !r.ok) {
+      out.appendChild(notice('bad', (r && r.error) || '读取设备堆栈失败'));
+      return;
+    }
+    const F = r.fields || {};
+    const top = r.top || {};
+    const cts = r.counts || {};
+
+    // ---- 当前界面 ----
+    const acts = el('div', { class: 'row' });
+    if (top.component) {
+      acts.appendChild(el('button', { class: 'btn', onclick: () => copyText(top.component) }, '复制组件'));
+    }
+    if (top.package) {
+      acts.appendChild(el('button', {
+        class: 'btn',
+        onclick: () => go('device.app.detail', { pkg: top.package }),
+      }, '应用详情'));
+      acts.appendChild(el('button', {
+        class: 'btn',
+        onclick: () => go('device.launch.start', { pkg: top.package, component: top.component }),
+      }, '用启动器打开'));
+    }
+    out.appendChild(card('当前界面',
+      `任务 ${cts.tasks || 0} 个（可见 ${cts.visibleTasks || 0}）/ `
+      + `Activity ${cts.activities || 0} 个 / 涉及 ${cts.packages || 0} 个包`,
+      el('div', { class: 'stack-fields' },
+        fCell(F, 'package', top.package, true),
+        fCell(F, 'className', top.className, true),
+        fCell(F, 'fullClass', top.fullClass, true),
+        fCell(F, 'component', top.component, true),
+        fCell(F, 'taskId', top.taskId, false)),
+      acts));
+
+    // ---- 任务 / Activity ----
+    let shown = 0;
+    for (const d of (r.displays || [])) {
+      for (const t of (d.tasks || [])) {
+        if (visOnly.checked && !t.visible) continue;
+        const all = t.activities || [];
+        // 任务名命中 → 把它下面的 Activity 全列出来；否则只列命中的那些
+        const byTask = hits(t.affinityPackage) && kw.value.trim() !== '';
+        const list = kw.value.trim() === '' ? all : (byTask ? all : all.filter(
+          (a) => hits(a.component) || hits(a.package) || hits(a.className) || hits(a.fullClass)));
+        if (kw.value.trim() !== '' && list.length === 0) continue;
+        shown += 1;
+        out.appendChild(taskCard(F, t, list, d.id));
+      }
+    }
+    if (shown === 0) {
+      out.appendChild(notice('warn', '没有匹配的任务。换个关键词，或取消「只看可见任务」。'));
+    }
+
+    out.appendChild(card('这条命令',
+      `原始输出 ${r.rawLines || 0} 行 / ${r.rawBytes || 0} 字节 —— 界面里只列结构化结果，命令原样留在这儿可复制`,
+      codeBlock(r.command || '')));
+  }
+
+  function taskCard(F, t, list, displayId) {
+    const head = el('div', { class: 'stack-task-hd' },
+      el('span', { class: 'stack-id mono' }, '#' + t.id),
+      el('span', { class: 'stack-aff mono' }, t.affinityPackage || '(无归属)'),
+      t.visible ? tag('可见', 'ok') : tag('不可见', 'plain'),
+      tag(t.modeText || t.mode || '-', 'plain'));
+    if (t.type) head.appendChild(tag(t.type, 'plain'));
+
+    const body = el('div', { class: 'stack-fields' },
+      fCell(F, 'taskId', t.id),
+      fCell(F, 'affinity', t.affinityPackage, true),
+      fCell(F, 'mode', t.modeText || t.mode, false),
+      fCell(F, 'visible', yn(t.visible)),
+      fCell(F, 'size', t.size != null ? t.size : ''),
+      fCell(F, 'bounds', t.bounds, true));
+
+    for (const a of list) {
+      body.appendChild(actBlock(F, a, displayId));
+    }
+    return card(head, null, body);
+  }
+
+  function actBlock(F, a, displayId) {
+    const hd = el('div', { class: 'stack-act-hd' },
+      el('span', { class: 'stack-idx mono' }, '#' + a.index),
+      el('span', { class: 'stack-comp mono' }, a.component || '-'),
+      stateTag(a));
+    if (a.isFocused) hd.appendChild(tag('当前焦点', 'brand'));
+    if (a.isTop) hd.appendChild(tag('栈顶', 'plain'));
+    if (a.appLabel) hd.appendChild(el('span', { class: 'stack-dim' }, a.appLabel));
+    hd.appendChild(el('span', { class: 'stack-sp' }));
+    if (a.component) {
+      hd.appendChild(el('button', { class: 'btn', onclick: () => copyText(a.component) }, '复制'));
+    }
+    if (a.package) {
+      hd.appendChild(el('button', {
+        class: 'btn',
+        onclick: () => go('device.app.detail', { pkg: a.package }),
+      }, '应用详情'));
+      hd.appendChild(el('button', {
+        class: 'btn',
+        onclick: () => go('device.launch.start', { pkg: a.package, component: a.component }),
+      }, '启动'));
+    }
+
+    return el('div', { class: 'stack-act' + (a.isResumed ? ' on' : '') }, hd,
+      el('div', { class: 'stack-fields' },
+        fCell(F, 'package', a.package, true),
+        fCell(F, 'appLabel', a.appLabel),
+        fCell(F, 'className', a.className, true),
+        fCell(F, 'fullClass', a.fullClass, true),
+        fCell(F, 'component', a.component, true),
+        fCell(F, 'state', a.stateText || a.state),
+        fCell(F, 'visible', a.visible != null ? yn(a.visible) : ''),
+        fCell(F, 'processName', a.processName, true),
+        fCell(F, 'pid', a.pid),
+        fCell(F, 'userId', a.userId),
+        fCell(F, 'taskId', a.taskId),
+        fCell(F, 'displayId', a.displayId || displayId),
+        fCell(F, 'launchedFromPackage', a.launchedFromPackage, true),
+        fCell(F, 'launchCount', a.launchCount),
+        fCell(F, 'lastLaunchTime', a.lastLaunchTime, true),
+        fCell(F, 'intent', a.intent, true)));
+  }
+
+  load(false);
+};
+
 VIEWS['device.apps'] = async function (host, cap, q) {
   const kw = el('input', { type: 'search', placeholder: '按应用名 / 包名过滤（空格分词）', value: q.filter || '' });
   const sys = el('input', { type: 'checkbox' });

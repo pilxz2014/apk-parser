@@ -98,6 +98,7 @@ GROUPS = [
     Group("local", "本机 · APK", "local", "解析、分析本机 APK 文件，不需要设备", "📦", 10),
     Group("device.apps", "设备 · 应用", "device", "已装应用检索、详情、签名、快捷操作", "📱", 20),
     Group("device.launcher", "设备 · 启动器", "device", "启动任意 Activity / Service / 广播", "🚀", 30),
+    Group("device.runtime", "设备 · 运行时", "device", "正在跑的界面、进程、堆栈快照", "🧭", 35),
     Group("device.capture", "设备 · 捕获", "device", "截图、录屏、实时镜像、日志", "📷", 40),
     Group("device.install", "设备 · 安装", "device", "安装前预检 + 安装执行 + 失败诊断", "⬇", 50),
     Group("device.files", "设备 · 文件", "device", "push / pull / 浏览设备文件", "📁", 60),
@@ -185,6 +186,13 @@ CAPABILITIES: List[Capability] = [
     Capability("device.launch.shortcut", "device.launcher", "我的入口", "保存常用启动为快捷入口",
                True, "low", "launch shortcut", "GET /api/launch/shortcut", "table", "⭐",
                tab_of="device.launch.start", tab_key="fav", tab_label="我的入口"),
+
+    # ================================================================
+    # 设备 · 运行时 —— 看的是"此刻设备上正在跑什么"
+    # ================================================================
+    Capability("device.stack", "device.runtime", "Activity 堆栈",
+               "dumpsys activity activities 结构化：当前界面 / 任务栈 / 每个 Activity 的状态",
+               True, "low", "device stack", "GET /api/device/stack", "detail", "🧭"),
 
     # ================================================================
     # 设备 · 捕获 —— 截图/录屏/镜像 都盯着屏幕，合成一格；日志与产物另放

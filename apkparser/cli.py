@@ -545,6 +545,56 @@ def cmd_device_tools(ns) -> int:
     return 0 if res.get("ok") else 1
 
 
+def cmd_device_stack(ns) -> int:
+    """当前 Activity 堆栈。
+
+    `dumpsys activity activities` 一次输出几百行，命令行里直接看等于
+    大海捞针；这里只印"当前是谁 + 栈里有什么"，要看全部字段用 --json。
+    """
+    from .core.device import stack as stack_mod
+    res = stack_mod.snapshot(device=ns.device, refresh=getattr(ns, "refresh", False))
+    if ns.json:
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0 if res.get("ok") else 1
+    if not res.get("ok"):
+        return fail(res.get("error") or "读取设备堆栈失败", ns.json)
+
+    top = res.get("top") or {}
+    console.banner("当前界面", top.get("component") or "-")
+    console.kv([
+        ("包名", top.get("package") or "-"),
+        ("类名", top.get("className") or "-"),
+        ("任务 ID", top.get("taskId") or "-"),
+        ("焦点窗口", res.get("focusWindow") or "-"),
+        ("任务 / 可见 / Activity", "%s / %s / %s"
+         % (res.get("counts", {}).get("tasks", 0),
+            res.get("counts", {}).get("visibleTasks", 0),
+            res.get("counts", {}).get("activities", 0))),
+    ])
+    console.hint("$ %s" % res.get("command", ""))
+    console.hint("原始输出 %s 行 / %s 字节，这里只列结构化结果（--json 看全部字段）"
+                 % (res.get("rawLines", 0), res.get("rawBytes", 0)))
+
+    for disp in res.get("displays", []):
+        console.info("Display #%s" % disp.get("id"))
+        for t in disp.get("tasks", []):
+            head = "  Task #%-5s %-28s %-10s 可见=%s Activity=%d" % (
+                t.get("id"), t.get("affinityPackage") or "-",
+                t.get("modeText") or t.get("mode") or "-",
+                "是" if t.get("visible") else "否", len(t.get("activities") or []))
+            console.info(head)
+            for a in t.get("activities", []):
+                flag = ""
+                if a.get("isResumed"):
+                    flag = " ← 前台"
+                elif a.get("isTop"):
+                    flag = " ← 栈顶"
+                console.info("      %-58s %s%s"
+                             % (a.get("component") or "-",
+                                a.get("stateText") or a.get("state") or "-", flag))
+    return 0
+
+
 def cmd_app_list(ns) -> int:
     from .core.device import apps as apps_mod
     items = apps_mod.list_apps(filter_kw=ns.filter or "", include_system=ns.system, device=ns.device)
@@ -1412,6 +1462,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("op", help="stop|clear|uninstall|dpi|rotate|airplane|reboot|input_text|wake ...")
     c.add_argument("arg", nargs="*")
     c.set_defaults(handler=cmd_device_tools)
+    c = _add_common(d.add_parser("stack", help="当前 Activity 堆栈（结构化）"))
+    c.add_argument("--refresh", action="store_true", help="忽略 3 秒缓存，重新读一次")
+    c.set_defaults(handler=cmd_device_stack)
 
     # ---- app ----
     app = sub.add_parser("app", help="已安装应用")
