@@ -42,6 +42,28 @@ python apktool.py apk info app.apk   # 命令行解析
 
 ---
 
+## 分发给别人用（绿色版）
+
+**发什么**：只有一个文件 —— `dist/APKConsole-win.zip`（约 16 MB）。
+
+收件人解压后是 `APKConsole/`，里面 `APKConsole.exe` + `_internal/` + `使用说明.txt`：
+双击 exe 就有服务 + 托盘图标 + 自动打开的页面，**不需要装 Python**，不写注册表、不留开机自启。
+`_internal/` 必须和 exe 待在一起（单独把 exe 拖出来会打不开）。
+
+| 事项 | 说明 |
+|---|---|
+| 打包 | Windows：`python package_win.py`；macOS：`python3 package_mac.py`（**要在 mac 上跑**，不能交叉编译） |
+| 说明书 | 包内 `使用说明.txt` 由 `docs/05-分发与使用说明.md` 复制生成 —— **改说明只改那份 md** |
+| 交付闸门 | `python tmp/verify32.py`（先出包再跑）：产物完整性 / 双击自动开页面 / frozen 静态资源 / 单例 |
+
+**已知边界**：绿色版**没有** `.apk` 右键菜单与双击安装（那套依赖源码树里的 `apk-*.cmd` +
+注册表项，包里没有这些脚本），请走主控台 —— 把 apk 拖进页面即可解析，安装走「设备·安装」。
+`adb` 仍需自行安装（只影响设备域，本机解析不受影响）。
+
+详细的分发/接收说明见 [docs/05-分发与使用说明.md](docs/05-分发与使用说明.md)。
+
+---
+
 ## 实现完成情况
 
 ### 四大块功能
@@ -92,6 +114,7 @@ python apktool.py apk info app.apk   # 命令行解析
 | [docs/02-交互设计稿.md](docs/02-交互设计稿.md) | 设计原则、四种交互载体、信息架构、逐屏线框、空态/错误态规范 |
 | [docs/03-技术方案.md](docs/03-技术方案.md) | 技术选型、分层架构、目录结构、CLI/HTTP 契约、跨平台适配矩阵、扩展机制 |
 | [docs/04-实现记录.md](docs/04-实现记录.md) | **实现期的真机实测结论、踩到的坑与修法、验证方式** |
+| [docs/05-分发与使用说明.md](docs/05-分发与使用说明.md) | **发给别人用的说明书**（打包脚本会复制成包内的 `使用说明.txt`） |
 | [docs/prototype/index.html](docs/prototype/index.html) | 可点击高保真原型（设计阶段产物，保留作对照） |
 
 ---

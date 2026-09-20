@@ -165,6 +165,24 @@ def run_tray(port: int) -> int:
     return 0
 
 
+def _auto_open_enabled() -> bool:
+    """双击启动时是否自动打开主控台页面。
+
+    `APKCONSOLE_NO_OPEN=1`（打包冒烟 / 自动化）优先；其次看配置项
+    `open_browser_on_start`（默认 True）。
+
+    这一条是「双击即用」体验的关键：只把服务起在后台、不开页面，用户看到
+    的就是"双击了一下，什么也没发生"（v0.2.6 实际收到的反馈）。
+    """
+    if os.environ.get("APKCONSOLE_NO_OPEN"):
+        return False
+    try:
+        from apkparser.config import get as cfg_get
+        return bool(cfg_get("open_browser_on_start", True))
+    except Exception:
+        return True
+
+
 def run_console(port: int) -> int:
     """降级：没有托盘环境（缺 pystray/Pillow、或无 GUI 会话）时控制台常驻。"""
     for stream in (sys.stdout, sys.stderr):
@@ -199,11 +217,10 @@ def main(argv=None) -> int:
 
     # 单例判定：端口上已有本工具实例 → 不起服务，打开页面后本进程退出，
     # 单例职责留在第一个进程（那边有托盘）。
-    no_open = bool(os.environ.get("APKCONSOLE_NO_OPEN"))   # 自动化测试用
-    res = start_service(port=port, open_browser=False)
+    # 自动开页面交给 start()（它两条分支都会开）：首次启动用 Timer 等端口就绪，
+    # 已有实例则立刻开。这样"双击"在两种情况下都有可见反馈。
+    res = start_service(port=port, open_browser=_auto_open_enabled())
     if res.get("alreadyRunning"):
-        if not no_open:
-            shell.open_url(res["url"])
         return 0
     if not res.get("ok"):
         # 起不来也把托盘挂上（状态=已停止），用户可以从菜单里重启

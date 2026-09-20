@@ -18,6 +18,7 @@ import time
 import urllib.request
 import json
 import shutil
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -25,6 +26,23 @@ APP = "APKConsole"
 DEPS = ["pyinstaller>=6.0", "pystray>=0.19", "pillow>=9.0",
         "pyobjc-framework-Cocoa>=9.0"]
 DIST = ROOT / "dist"
+# 发行说明书：唯一真相是 docs/ 里那份，打包时复制一份进 zip
+README_SRC = ROOT / "docs" / "05-分发与使用说明.md"
+README_NAME = "使用说明.txt"
+
+
+def copy_readme(dest_dir: Path) -> "Path | None":
+    """把说明书放到 dist（随后一起打进 zip）。mac 用纯 UTF-8、LF 换行。"""
+    try:
+        text = README_SRC.read_text(encoding="utf-8")
+    except OSError as e:
+        print("[X] 读不到说明书 %s：%s" % (README_SRC, e))
+        return None
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    out = dest_dir / README_NAME
+    out.write_text(text, encoding="utf-8", newline="\n")
+    print("[..] 已放入说明书：%s" % out)
+    return out
 
 
 def fail(msg: str) -> int:
@@ -119,12 +137,17 @@ def main() -> int:
     adhoc_sign()
     if "--no-smoke" not in sys.argv:
         smoke()
-    zip_base = str(DIST / (APP + "-mac"))
-    shutil.make_archive(zip_base, "zip", root_dir=str(DIST), base_dir=APP + ".app")
+    readme = copy_readme(DIST)
+    zip_path = "%s.zip" % (DIST / (APP + "-mac"))
+    shutil.make_archive(zip_path[:-4], "zip", root_dir=str(DIST),
+                        base_dir=APP + ".app")
+    if readme:                              # 说明书挂在 zip 里 .app 的旁边
+        with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as z:
+            z.write(str(readme), arcname=README_NAME)
     print()
     print("[OK] 打包完成：")
     print("  应用包  ：%s" % app)
-    print("  压缩包  ：%s.zip" % zip_base)
+    print("  压缩包  ：%s" % zip_path)
     print("  双击 APKConsole.app → 托盘常驻（菜单栏右上角）+ 浏览器打开主控台")
     print("  注：产物未公证，首次打开如被拦，右键 → 打开，或到 系统设置-隐私与安全性 放行")
     return 0

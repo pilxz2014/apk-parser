@@ -24,6 +24,23 @@ ROOT = Path(__file__).resolve().parent
 APP = "APKConsole"
 DEPS = ["pyinstaller>=6.0", "pystray>=0.19", "pillow>=9.0"]
 DIST = ROOT / "dist"
+# 发行说明书：唯一真相是 docs/ 里那份，打包时复制成 exe 同级的 使用说明.txt
+README_SRC = ROOT / "docs" / "05-分发与使用说明.md"
+README_NAME = "使用说明.txt"
+
+
+def copy_readme(dest_dir: Path) -> bool:
+    """把说明书放进发行目录（UTF-8 **带 BOM** —— Windows 记事本不猜编码，
+    没 BOM 的老版本会把中文显示成乱码）。"""
+    try:
+        text = README_SRC.read_text(encoding="utf-8")
+    except OSError as e:
+        print("[X] 读不到说明书 %s：%s" % (README_SRC, e))
+        return False
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / README_NAME).write_text(text, encoding="utf-8-sig", newline="\r\n")
+    print("[..] 已放入说明书：%s" % (dest_dir / README_NAME))
+    return True
 
 
 def fail(msg: str) -> "int":
@@ -129,6 +146,8 @@ def main() -> int:
         return fail("构建完成但找不到 %s" % exe)
     if "--no-smoke" not in sys.argv:
         smoke()
+    if not copy_readme(exe.parent):
+        return fail("说明书没能放进发行目录")
     zip_base = str(DIST / (APP + "-win"))
     shutil.make_archive(zip_base, "zip", root_dir=str(DIST), base_dir=APP)
     print()
