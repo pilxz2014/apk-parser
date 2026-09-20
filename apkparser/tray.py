@@ -151,6 +151,10 @@ def run_tray(port: int) -> int:
                         _status_text(), build_menu())
 
     def _setup(icon_) -> None:
+        # 自定义 setup **必须自己点亮 visible**（pystray 只有在默认 setup 里才会设），
+        # 否则 _show()/NIM_ADD 永远不会被调用 —— 进程活着、消息循环在转，
+        # 托盘却静默地什么都不显示（v0.2.6 实际踩过的坑，见 docs §5.6）。
+        icon_.visible = True
         _refresh(icon_)
         if STATE["running"]:
             _notify(icon_, "服务已启动 · %s" % STATE["url"])
