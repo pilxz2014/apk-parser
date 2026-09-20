@@ -3830,6 +3830,15 @@ VIEWS['device.install.errors'] = async function (host) {
 
 /* ------------------------------------------------ 文件 */
 
+/* 「拉回」的默认落点：记住上次选的目录，下次对话框直接落在那儿
+ * （跟 apk.lastFile 一个道理 —— 让人反复选同一个目录也是成本）。 */
+function pullDir(v) {
+  try {
+    if (v) { localStorage.setItem('apk.pullDir', v); return v; }
+    return localStorage.getItem('apk.pullDir') || '';
+  } catch (_) { return v || ''; }
+}
+
 VIEWS['device.files'] = async function (host, cap, q) {
   // 像文件管理器那样用：点目录展开下一层（懒加载），双击"进入"（换根）。
   // 之前只有一张平表、进目录得手改路径框 —— 那不像浏览，像填表。
@@ -3865,16 +3874,24 @@ VIEWS['device.files'] = async function (host, cap, q) {
           onclick: (e) => { e.stopPropagation(); goPath(ent.path); },
         }, '进入') : null,
         ent.dir ? null : el('button', {
-          class: 'btn sm', title: '拉到本机',
+          class: 'btn sm', title: '拉回本机：弹一个目录选择框，选到哪儿就存到哪儿',
           onclick: async (e) => {
             e.stopPropagation();
-            const dst = await ask({ title: '拉回本机', message: '目标路径', value: 'D:\\' + ent.name });
-            if (!dst) return;
+            // 让人默写自己磁盘的绝对路径是不可接受的交互 —— 一律走目录对话框
+            // （原生对话框不可用时，pickLocalDir 自己会退到页面内的目录浏览器）。
+            // 传的是**目录**：文件名沿用设备上的，省掉再想一次名字。
+            const dir = await pickLocalDir({
+              title: '把「' + ent.name + '」保存到哪个目录',
+              start: pullDir(),
+            });
+            if (!dir) return;                        // 取消 → 什么都不做
+            pullDir(dir);
             try {
               const r2 = await api('/api/files/pull', {
-                method: 'POST', body: { src: ent.path, dst, device: devParam() },
+                method: 'POST', body: { src: ent.path, dst: dir, device: devParam() },
               });
-              toast(r2.ok ? '已拉到 ' + r2.dst : (r2.detail || '失败'), r2.ok ? 'ok' : 'bad');
+              if (!r2.ok) { toast(r2.detail || '拉回失败', 'bad'); return; }
+              toast('已保存到 ' + (r2.file || dir), 'ok');
             } catch (er) { toast(er.message, 'bad'); }
           },
         }, '拉回'),

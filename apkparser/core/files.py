@@ -295,7 +295,24 @@ def pull(src: str, dst: str = "", device: str = "") -> dict:
     command = adb_mod.command_preview(args, serial)
     out = (r.out or "").strip()
     return {"ok": r.ok, "detail": out.splitlines()[-1] if out else (r.err or "失败").strip(),
-            "dest": dest, "commands": [command]}
+            "dest": dest, "file": _pulled_file(dest, src) if r.ok else "",
+            "commands": [command]}
+
+
+def _pulled_file(dest: str, src: str) -> str:
+    """落地的那个文件的完整路径。
+
+    `adb pull src dest` 的规则：dest 是**已存在的目录** → 文件落进去，文件名沿用
+    设备上的；否则 dest 就是文件名本身。界面要告诉用户"存到哪儿了"，
+    所以这里把这条规则显式算出来 —— 前端拿 `file`，不用自己拼。
+    """
+    try:
+        p = Path(dest)
+        if p.is_dir():
+            return str(p / Path(str(src).replace("\\", "/")).name)
+        return str(p)
+    except Exception:
+        return ""
 
 
 def rm(path: str, device: str = "", recursive: bool = False) -> dict:
