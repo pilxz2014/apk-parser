@@ -35,9 +35,9 @@ from typing import Dict, List, Optional, Tuple
 from ..platform import paths, shell
 
 __all__ = [
-    "library_root", "list_dir", "make_folder", "add_existing", "create",
-    "read_script", "write_script", "rename", "move", "set_note", "delete",
-    "run", "folder_choices",
+    "library_root", "list_dir", "folder_tree", "make_folder", "add_existing",
+    "create", "read_script", "write_script", "rename", "move", "set_note",
+    "set_alias", "delete", "run", "folder_choices", "bash_path",
 ]
 
 META_NAME = ".scripts.json"
@@ -216,10 +216,10 @@ def _run_argv(p: Path, kind: str, args: str) -> Tuple[List[str], str]:
         if kind == "py":
             return [shell_python(), str(p)] + extra, "python " + str(p)
         if kind == "sh":
-            bash = _find_bash()
+            bash = bash_path()
             if not bash:
-                raise ValueError("Windows 上没有找到 bash（Git Bash / WSL），无法运行 .sh；"
-                                 "可以改用 .bat，或把脚本内容转成批处理")
+                raise ValueError("Windows 上没有找到 bash（装了 Git for Windows 就能跑 .sh，"
+                                 "它是自带的 Git\\bin\\bash.exe）；也可以改用 .bat")
             return [bash, str(p)] + extra, "bash " + str(p)
     else:
         if kind == "sh":
@@ -237,17 +237,105 @@ def shell_python() -> str:
     return sys.executable or "python"
 
 
-def _find_bash() -> str:
+# bash 的探测结果会被每个列表项用到（"将如何运行"要预览），而探测要扫
+# PATH + 注册表 + 若干固定路径 —— 一次列 20 个脚本就扫 20 遍，故缓存。
+# 找不到时缓存时间短一些：用户中途装了 Git，不用重启主控台就能生效。
+_BASH_CACHE = {"path": "", "ts": 0.0, "tried": False}
+_BASH_TTL_HIT = 300.0
+_BASH_TTL_MISS = 30.0
+
+
+def bash_path() -> str:
+    """Windows 上可用的 bash（Git Bash / WSL）。找不到返回空串。
+
+    Windows 本身不带 bash，但**装了 Git for Windows 就有**：它自带一份
+    MSYS 环境（`Git\\bin\\bash.exe`）。常见的坑是 Git 装在 D 盘或自定义目录，
+    只认 `C:\\Program Files\\Git` 会漏掉 —— 所以按这个顺序找：
+
+      1. PATH 上的 bash（Git 勾了"添加到 PATH"、或 WSL 的 bash.exe）
+      2. 注册表 `GitForWindows\\InstallPath`（官方安装器必写，最准）
+      3. `where git` 找到的 git.exe 往上推（Git\\cmd 或 Git\\bin 的上一级）
+      4. 各盘 Program Files 下的常见位置（C/D 两个盘够了，不扫全盘）
+
+    实测（Git 2.x / MSYS）：`bash "D:\\a b\\x.sh"` 反斜杠 + 空格都能直接跑，
+    MSYS 会自己做路径转换，所以拿到 bash 之后**照常传 Windows 路径**即可，
+    不需要 cygpath（cygpath 在非 login 的 bash 里还不一定在 PATH 上）。
+    """
+    now = time.time()
+    c = _BASH_CACHE
+    if c["tried"]:
+        ttl = _BASH_TTL_HIT if c["path"] else _BASH_TTL_MISS
+        if now - c["ts"] < ttl:
+            return c["path"]
+    hit = _find_bash_uncached()
+    c.update({"path": hit, "ts": now, "tried": True})
+    return hit
+
+
+def _find_bash_uncached() -> str:
+    if not paths.IS_WINDOWS:
+        return shutil.which("bash") or "/bin/bash"
+
     for n in ("bash.exe", "bash"):
         hit = shutil.which(n)
         if hit:
             return hit
+
+    # 官方安装器写的注册表项（HKLM，也会镜像到 HKCU）
+    for ins in _git_install_paths():
+        for rel in (r"bin\bash.exe", r"usr\bin\bash.exe"):
+            cand = Path(ins) / rel
+            if cand.is_file():
+                return str(cand)
+
     for cand in (r"C:\Program Files\Git\bin\bash.exe",
                  r"C:\Program Files (x86)\Git\bin\bash.exe",
-                 r"C:\Program Files\Git\usr\bin\bash.exe"):
+                 r"C:\Program Files\Git\usr\bin\bash.exe",
+                 r"D:\Program Files\Git\bin\bash.exe"):
         if Path(cand).is_file():
             return cand
+    # 刻意不兜 WSL：WSL 里的换行符/路径/权限跟 Windows 不是一套，脚本能跑但
+    # 结果常常对不上，还不如明确告诉用户"没找到 bash"。
     return ""
+
+
+def _git_install_paths() -> List[str]:
+    """Git for Windows 的安装目录（注册表 + `where git` 反推）。"""
+    out: List[str] = []
+
+    def add(v) -> None:
+        v = str(v or "").strip().strip('"')
+        if v and v not in out:
+            out.append(v)
+
+    try:
+        import winreg  # noqa: WPS433 —— 只有 Windows 才会走到这里
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for sub in (r"SOFTWARE\GitForWindows", r"SOFTWARE\WOW6432Node\GitForWindows"):
+                try:
+                    k = winreg.OpenKey(hive, sub)
+                    try:
+                        add(winreg.QueryValueEx(k, "InstallPath")[0])
+                    finally:
+                        winreg.CloseKey(k)
+                except OSError:
+                    continue
+    except Exception:
+        pass
+
+    try:
+        r = shell.run(["where", "git.exe"], timeout=10)
+        first = (r.out or "").strip().splitlines()
+        if first:
+            g = Path(first[0].strip())
+            # …\Git\cmd\git.exe 或 …\Git\bin\git.exe → 上两级才是 Git 根
+            for up in (g.parent.parent, g.parent):
+                if (up / "bin" / "bash.exe").is_file():
+                    add(str(up))
+                    break
+    except Exception:
+        pass
+    return out
 
 
 def _runnable(kind: str) -> bool:
@@ -256,7 +344,7 @@ def _runnable(kind: str) -> bool:
         if kind in ("bat", "ps1", "py"):
             return True
         if kind == "sh":
-            return bool(_find_bash())
+            return bool(bash_path())
         return True          # 无扩展名/其他 → 交给 cmd 试
     return kind in ("sh", "py")
 
@@ -314,6 +402,46 @@ def _crumbs(rel: str) -> List[dict]:
     return out
 
 
+def folder_tree() -> dict:
+    """整棵目录树（侧栏那个可以展开/折叠的多级层级）。
+
+    一次把全树给前端，是为了**展开不用再发请求**：目录这种东西一共也就几十个，
+    反复 `GET /api/scripts?folder=` 去逐层探，点一下卡一下，交互上很难受。
+    """
+    root = _root()
+    root.mkdir(parents=True, exist_ok=True)
+
+    def walk(d: Path) -> dict:
+        subs = []
+        scripts = 0
+        try:
+            for e in sorted(d.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                if e.name.startswith("."):
+                    continue
+                if e.is_dir():
+                    subs.append(walk(e))
+                elif e.is_file():
+                    scripts += 1
+        except OSError:
+            pass
+        return {
+            "name": d.name if str(d) != str(root) else "脚本库",
+            "rel": _rel_of(d) if str(d) != str(root) else "",
+            "children": subs,
+            "counts": {"folders": len(subs), "scripts": scripts},
+        }
+
+    tree = walk(root)
+    return {"ok": True, "root": str(root), "tree": tree,
+            "height": _tree_height(tree)}
+
+
+def _tree_height(node: dict) -> int:
+    if not node.get("children"):
+        return 1
+    return 1 + max((_tree_height(c) for c in node["children"]), default=0)
+
+
 def _item_of(p: Path, meta: dict) -> dict:
     kind = _kind_of(p.name)
     st = p.stat()
@@ -327,9 +455,12 @@ def _item_of(p: Path, meta: dict) -> dict:
     except OSError:
         pass
     rel = _rel_of(p)
+    alias = str(meta.get("alias") or "").strip()
     return {
         "name": p.name, "rel": rel, "kind": kind,
         "kindText": KIND_LABEL.get(kind, "文本"),
+        # 界面上显示的名字：**别名优先**，没起别名就用文件名
+        "display": alias or p.name, "alias": alias,
         "ext": p.suffix.lower(), "size": st.st_size, "mtime": st.st_mtime,
         "lines": lines, "encoding": enc, "summary": summary,
         "note": meta.get("note", ""), "runs": int(meta.get("runs") or 0),
@@ -474,7 +605,8 @@ def read_script(rel: str) -> dict:
     m = _meta_of(_rel_of(p))
     return {"ok": True, "name": p.name, "rel": _rel_of(p), "text": text,
             "encoding": enc, "kind": _kind_of(p.name), "note": m.get("note", ""),
-            "size": p.stat().st_size, "absPath": str(p)}
+            "alias": m.get("alias", ""), "size": p.stat().st_size,
+            "absPath": str(p)}
 
 
 def write_script(rel: str, text: str) -> dict:
@@ -558,6 +690,20 @@ def move(rel: str, folder_rel: str) -> dict:
 
 
 def set_note(rel: str, note: str) -> dict:
+    return _set_field(rel, "note", str(note or ""))
+
+
+def set_alias(rel: str, alias: str) -> dict:
+    """改**展示名**（别名）—— 只改界面上显示成什么，**不动磁盘上的文件名**。
+
+    为什么脚本要有别名：收进来的脚本叫 `login-test.sh`、`input_test.sh` 这种
+    文件名，看着是"它是什么"，不是"什么时候用它"；改真名又会破坏脚本里的
+    相对引用（比如脚本 A 里 `source ./common.sh`），所以显示名单独存一份。
+    """
+    return _set_field(rel, "alias", str(alias or ""))
+
+
+def _set_field(rel: str, key: str, value: str) -> dict:
     try:
         p = _resolve(rel)
     except ValueError as e:
@@ -565,13 +711,15 @@ def set_note(rel: str, note: str) -> dict:
     if not p.exists():
         return _fail("不存在：%s" % rel)
     d = _load_meta()
-    key = _rel_of(p)
-    m = d.get(key) or {}
-    m["note"] = str(note or "")
+    m = d.get(_rel_of(p)) or {}
+    m[key] = value
     m["updated"] = time.time()
-    d[key] = m
+    d[_rel_of(p)] = m
     _save_meta(d)
-    return {"ok": True, "rel": key, "note": m["note"]}
+    out = {"ok": True, "rel": _rel_of(p), key: value}
+    if key == "alias":
+        out["display"] = value or p.name
+    return out
 
 
 def delete(rel: str) -> dict:

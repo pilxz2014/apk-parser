@@ -248,7 +248,7 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
    一条脚本要同时带  名称 / 类型 / 备注 / 大小·行数·时间 / 将如何运行，
    塞进表格列会挤成一团，卡片能一行一样地铺开。
 */
-.scr-wrap { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 14px; margin-top: 12px; }
+.scr-wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; margin-top: 12px; }
 @media (max-width: 900px) { .scr-wrap { grid-template-columns: 1fr; } }
 
 .scr-side {
@@ -261,20 +261,45 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
   padding: 0 2px 8px; border-bottom: 1px solid var(--line-2); margin-bottom: 6px;
 }
 .scr-tree { display: flex; flex-direction: column; gap: 1px; }
+.scr-tree-b { display: flex; flex-direction: column; gap: 1px; }
 .scr-tree-i {
-  padding: 5px 8px; border-radius: 6px; cursor: pointer;
-  font-size: 12.5px; color: var(--ink-2); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer;
+  font-size: 12.5px; color: var(--ink-2);
 }
 .scr-tree-i:hover { background: var(--panel-2); }
 .scr-tree-i.on { background: var(--brand-soft); color: var(--brand); font-weight: 650; }
+/* 展开箭头：没有子目录时也占位，名字才不会左右不齐 */
+.scr-tw {
+  flex: 0 0 14px; width: 14px; text-align: center;
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--dim); font-size: 10px; line-height: 1;
+}
+.scr-tw:hover { color: var(--brand); }
+.scr-tw.none { cursor: default; }
 /* 层级缩进按 data-depth 给 —— 行内 padding 会让"间距只有一个来源"破掉 */
-.scr-tree-i[data-depth="0"] { padding-left: 8px; }
-.scr-tree-i[data-depth="1"] { padding-left: 21px; }
-.scr-tree-i[data-depth="2"] { padding-left: 34px; }
-.scr-tree-i[data-depth="3"] { padding-left: 47px; }
-.scr-tree-i[data-depth="4"] { padding-left: 60px; }
-.scr-tree-n { overflow: hidden; text-overflow: ellipsis; }
+.scr-tree-i[data-depth="0"] { padding-left: 6px; }
+.scr-tree-i[data-depth="1"] { padding-left: 19px; }
+.scr-tree-i[data-depth="2"] { padding-left: 32px; }
+.scr-tree-i[data-depth="3"] { padding-left: 45px; }
+.scr-tree-i[data-depth="4"] { padding-left: 58px; }
+.scr-tree-i[data-depth="5"] { padding-left: 71px; }
+.scr-tree-i[data-depth="6"] { padding-left: 84px; }
+.scr-tree-n {
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+  color: inherit; font: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.scr-tree-c { font-size: 10.5px; color: var(--dim); }
+/* 「＋脚本 / ＋目录」只在悬停时出现：常显会把一栏挤成按钮墙 */
+.scr-tree-a {
+  display: none; flex: 0 0 auto;
+  background: none; border: none; padding: 1px 3px; cursor: pointer;
+  color: var(--dim); font-size: 10.5px; border-radius: 4px;
+}
+.scr-tree-i:hover .scr-tree-a { display: inline-block; }
+.scr-tree-a:hover { color: var(--brand); background: var(--panel); }
+.scr-tree-empty { font-size: 11.5px; color: var(--dim); padding: 6px; }
 
 .scr-main { min-width: 0; }
 .scr-crumb { display: flex; align-items: center; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -298,6 +323,8 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
 .scr-name:hover { color: var(--brand); text-decoration: underline; }
 .scr-sp { flex: 1 1 auto; }
 .scr-meta { font-size: 11.5px; color: var(--dim); margin-top: 5px; }
+/* 起了别名之后，真实文件名降成小字 —— 别让人以为改名会动到磁盘 */
+.scr-file { color: var(--dim); }
 .scr-note { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
 .scr-sum { font-size: 12px; color: var(--dim); margin-top: 3px; font-style: italic; }
 .scr-cmd { font-size: 11.5px; color: var(--dim); margin-top: 5px; word-break: break-all; }

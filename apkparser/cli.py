@@ -546,7 +546,7 @@ def cmd_device_tools(ns) -> int:
 
 
 def cmd_script(ns) -> int:
-    """脚本存档库：list / add / new / show / note / rename / rm / run。"""
+    """脚本存档库：list / add / new / show / note / alias / mkdir / rename / rm / run。"""
     from .core import scripts as smod
     op = ns.op
 
@@ -567,8 +567,8 @@ def cmd_script(ns) -> int:
         console.banner("脚本库", r.get("absPath", ""))
         for f in r.get("folders", []):
             console.info("  [目录] %-30s %d 项" % (f["name"] + "/", f["count"]))
-        rows = [[i["name"], i["kindText"], i["size"], i.get("note") or i.get("summary") or "-"]
-                for i in r.get("items", [])]
+        rows = [[i.get("display") or i["name"], i["kindText"], i["size"],
+                 i.get("note") or i.get("summary") or "-"] for i in r.get("items", [])]
         if rows:
             console.table(["名称", "类型", "字节", "备注 / 摘要"], rows,
                           max_widths=[34, 10, 10, 40])
@@ -606,6 +606,19 @@ def cmd_script(ns) -> int:
         r = smod.set_note(ns.path, ns.text)
         if not ns.json and r.get("ok"):
             console.ok("备注已保存：%s" % r.get("rel"))
+        return out(r)
+
+    if op == "alias":
+        r = smod.set_alias(ns.path, ns.text)
+        if not ns.json and r.get("ok"):
+            console.ok("展示名已改为：%s（文件名仍是 %s）"
+                       % (r.get("display"), ns.path.rsplit("/", 1)[-1]))
+        return out(r)
+
+    if op == "mkdir":
+        r = smod.make_folder(getattr(ns, "folder", "") or "", ns.name)
+        if not ns.json and r.get("ok"):
+            console.ok("已建分类：%s" % r.get("rel"))
         return out(r)
 
     if op == "rename":
@@ -1725,6 +1738,14 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("path")
     c.add_argument("text", nargs="?", default="")
     c.set_defaults(handler=cmd_script, op="note")
+    c = _add_common(sc.add_parser("alias", help="改展示名（别名，不动文件名）"), device=False)
+    c.add_argument("path")
+    c.add_argument("text", nargs="?", default="")
+    c.set_defaults(handler=cmd_script, op="alias")
+    c = _add_common(sc.add_parser("mkdir", help="新建分类目录（任意层级）"), device=False)
+    c.add_argument("name")
+    c.add_argument("--folder", default="", help="建在哪个目录下（默认库根）")
+    c.set_defaults(handler=cmd_script, op="mkdir")
     c = _add_common(sc.add_parser("rename", help="重命名"), device=False)
     c.add_argument("path")
     c.add_argument("name")

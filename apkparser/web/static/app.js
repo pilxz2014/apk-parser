@@ -4191,7 +4191,8 @@ VIEWS['device.files'] = async function (host, cap, q) {
 VIEWS['system.scripts'] = async function (host, cap, q) {
   let cur = q.folder || '';
   let data = null;
-  let folders = [];
+  let treeData = null;                  // 整棵目录树（展开不用再发请求）
+  const opened = new Set();             // 展开着的目录 rel
 
   const kw = el('input', { type: 'search', placeholder: '按名称 / 备注 / 摘要过滤…' });
   const tree = el('div', { class: 'scr-tree' });
@@ -4228,13 +4229,17 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
     list.innerHTML = '';
     list.appendChild(spinner('读取脚本库…'));
     try {
-      const [d, f] = await Promise.all([
+      const [d, t] = await Promise.all([
         api('/api/scripts', { params: { folder: cur } }),
-        api('/api/scripts/folders').catch(() => ({ ok: false })),
+        api('/api/scripts/tree').catch(() => ({ ok: false })),
       ]);
       data = d;
-      folders = (f && f.folders) || [];
+      treeData = (t && t.tree) || null;
       rootPath.textContent = d.root || '';
+      // 第一次进来（或跳到某个深层目录时）把到当前目录这一路都展开，
+      // 否则用户点进去看不到自己在哪一级。根默认就是展开的。
+      opened.add('');
+      for (const c of (d.crumbs || [])) if (c.rel) opened.add(c.rel);
       renderTree();
       paint();
     } catch (e) {
@@ -4244,25 +4249,83 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
     }
   }
 
+  // ---- 侧栏：多级目录树（一次拿全树，展开/折叠不再发请求）----
+
   function renderTree() {
     tree.innerHTML = '';
-    tree.appendChild(treeItem({ name: '脚本库', rel: '' }, 0));
-    for (const f of folders) {
-      if (!f.rel) continue;
-      const depth = f.rel.split('/').length - 1;
-      tree.appendChild(treeItem({ name: f.rel.split('/').pop(), rel: f.rel }, depth));
+    if (!treeData) {
+      tree.appendChild(el('div', { class: 'scr-tree-empty' }, '（目录树读取失败）'));
+      return;
     }
+    tree.appendChild(treeNode(treeData, 0));
   }
 
-  function treeItem(f, depth) {
-    const on = f.rel === cur;
-    // 缩进交给 CSS（`[data-depth]`）—— 行内写间距会让"间距只有一个来源"这条破掉
-    return el('div', {
+  function treeNode(node, depth) {
+    const kids = node.children || [];
+    const on = (node.rel || '') === cur;
+    const hasKids = kids.length > 0;
+    const open = hasKids && (opened.has(node.rel || '') || onAncestor(node));
+
+    const row = el('div', {
       class: 'scr-tree-i' + (on ? ' on' : ''),
-      dataset: { depth: String(Math.min(depth, 4)) },
-      onclick: () => { if (!on) go('system.scripts', { folder: f.rel }); },
-      title: f.rel || '脚本库根目录',
-    }, el('span', { class: 'scr-tree-n' }, f.name));
+      dataset: { depth: String(Math.min(depth, 6)) },
+      title: (node.rel || '脚本库根目录')
+        + '（' + (node.counts ? node.counts.scripts : 0) + ' 个脚本）',
+    });
+
+    // 展开箭头：没有子目录就占位（保持缩进对齐，不然一列名字会歪）
+    row.appendChild(el('button', {
+      class: 'scr-tw' + (hasKids ? '' : ' none'),
+      onclick: (e) => {
+        e.stopPropagation();
+        if (!hasKids) return;
+        if (opened.has(node.rel || '')) opened.delete(node.rel || '');
+        else opened.add(node.rel || '');
+        renderTree();
+      },
+    }, hasKids ? (open ? '▾' : '▸') : ''));
+
+    row.appendChild(el('button', {
+      class: 'scr-tree-n',
+      onclick: () => { if (!on) go('system.scripts', { folder: node.rel || '' }); },
+    }, (node.name || '脚本库')));
+
+    if (hasKids) row.appendChild(el('span', { class: 'scr-tree-c' }, String(kids.length)));
+
+    // 悬停出现的两个小按钮：**在这一级**新建脚本 / 子目录（任意层级都能加）
+    row.appendChild(el('span', { class: 'scr-sp' }));
+    row.appendChild(el('button', {
+      class: 'scr-tree-a', title: '在「' + (node.name || '脚本库') + '」下新建脚本',
+      onclick: (e) => { e.stopPropagation(); newScript(node.rel || ''); },
+    }, '＋脚本'));
+    row.appendChild(el('button', {
+      class: 'scr-tree-a', title: '在「' + (node.name || '脚本库') + '」下新建子目录',
+      onclick: (e) => { e.stopPropagation(); newFolder(node.rel || ''); },
+    }, '＋目录'));
+
+    const box = el('div', { class: 'scr-tree-b' });
+    box.appendChild(row);
+    if (open) for (const k of kids) box.appendChild(treeNode(k, depth + 1));
+    return box;
+  }
+
+  /** 当前目录的**祖先**要强制展开 —— 不然刷新后只剩一根，找不回自己在哪 */
+  function onAncestor(node) {
+    const rel = node.rel || '';
+    return !!rel && cur.indexOf(rel + '/') === 0;
+  }
+
+  /** 树 → 扁平列表（「移到…」下拉用；带缩进前缀，层级一眼可见） */
+  function flattenTree(node, depth, out) {
+    out = out || [];
+    if (!node) return out;
+    depth = depth || 0;
+    if (node.rel !== undefined && node.rel !== null) {
+      const pad = depth ? '　'.repeat(depth) + '└ ' : '';
+      out.push({ rel: node.rel || '', label: pad + (node.name || '脚本库') });
+    }
+    for (const k of (node.children || [])) flattenTree(k, depth + 1, out);
+    return out;
   }
 
   function paint() {
@@ -4284,7 +4347,8 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
 
     const k = kw.value.trim().toLowerCase();
     const items = (data.items || []).filter((it) => !k
-      || (it.name + ' ' + (it.note || '') + ' ' + (it.summary || '')).toLowerCase().indexOf(k) >= 0);
+      || ((it.display || it.name) + ' ' + it.name + ' ' + (it.note || '') + ' '
+        + (it.summary || '')).toLowerCase().indexOf(k) >= 0);
     const subs = (data.folders || []).filter((f) => !k || f.name.toLowerCase().indexOf(k) >= 0);
 
     if (!items.length && !subs.length) {
@@ -4318,19 +4382,22 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
         class: 'scr-name mono',
         title: '点击运行：' + (it.command || ''),
         onclick: () => runScript(it),
-      }, it.name),
+      }, it.display || it.name),
+      it.alias ? tag('别名', 'plain') : null,
       tag(it.kindText || '文本', it.runnable ? 'ok' : 'plain'),
       it.runs ? tag('跑过 ' + it.runs + ' 次', 'plain') : null,
       it.lastRun ? el('span', { class: 'scr-meta' }, '上次 ' + fmtAgo(it.lastRun)) : null,
       el('span', { class: 'scr-sp' }),
       el('button', { class: 'btn sm primary', onclick: () => runScript(it) }, '运行'),
       el('button', { class: 'btn sm', onclick: () => editScript(it) }, '编辑'),
+      // 展示名 ≠ 文件名：改这里不会动磁盘上的文件（脚本里的相对引用才不会断）
+      el('button', { class: 'btn sm', onclick: () => aliasScript(it) }, '别名'),
       el('button', { class: 'btn sm', onclick: () => noteScript(it) }, '备注'),
-      el('button', { class: 'btn sm', onclick: () => renamePath(it.rel, it.name, false) }, '重命名'),
       el('button', { class: 'btn sm', onclick: () => moveScript(it) }, '移到'),
       el('button', { class: 'btn sm danger', onclick: () => delPath(it.rel, it.name, false) }, '删除'));
 
     const meta = el('div', { class: 'scr-meta' },
+      el('span', { class: 'mono scr-file' }, it.name), ' · ',
       fmtBytes(it.size), ' · ', (it.lines || 0) + ' 行', ' · ',
       (it.encoding || 'utf-8').toUpperCase(), ' · 改于 ', fmtAgo(it.mtime),
       it.runnable ? '' : ' · 当前系统不能直接运行');
@@ -4403,9 +4470,28 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
     } catch (e) { toast(e.message, 'bad'); }
   }
 
-  async function newScript() {
+  async function aliasScript(it) {
+    const v = await textModal({
+      title: '展示名（别名）· ' + it.name,
+      value: it.alias || '',
+      label: '只改界面上显示成什么，**磁盘上的文件名不动**（' + it.name + '）。'
+        + '留空就恢复成文件名。真正要改文件名用命令行 `apk script rename`。',
+      rows: 2,
+      placeholder: '例：登录模块冒烟',
+    });
+    if (v == null) return;
+    try {
+      const r = await api('/api/scripts/alias', { method: 'POST', body: { path: it.rel, alias: v } });
+      toast(r.ok ? ('展示名已改为「' + (r.display || it.name) + '」') : (r.error || '保存失败'),
+        r.ok ? 'ok' : 'bad');
+      if (r.ok) load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function newScript(folder) {
+    const where = (folder === undefined || folder === null) ? cur : folder;
     const f = await formModal({
-      title: '新建脚本',
+      title: '新建脚本' + (where ? '到「' + where + '」' : '（脚本库根）'),
       hint: '名字不用带扩展名，会按类型自动补',
       fields: [
         { key: 'name', label: '脚本名', placeholder: 'restart-adb' },
@@ -4423,31 +4509,34 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
     if (!f || !f.name) return;
     try {
       const r = await api('/api/scripts/new', {
-        method: 'POST', body: { folder: cur, name: f.name, kind: f.kind },
+        method: 'POST', body: { folder: where, name: f.name, kind: f.kind },
       });
       if (!r.ok) { toast(r.error || '创建失败', 'bad'); return; }
       toast('已创建 ' + r.name, 'ok');
       // 建完直接进编辑器 —— 新建就是为了马上写内容
-      await load(cur);
+      await load(where);
       const it = (data && data.items || []).find((x) => x.rel === r.rel);
       if (it) editScript(it);
     } catch (e) { toast(e.message, 'bad'); }
   }
 
-  async function newFolder() {
+  async function newFolder(folder) {
+    const where = (folder === undefined || folder === null) ? cur : folder;
     const f = await formModal({
-      title: '新建分类目录',
-      hint: '目录就是分类（adb / 打包 / 巡检…），在磁盘上真实存在',
+      title: '新建分类目录' + (where ? '到「' + where + '」' : '（脚本库根）'),
+      hint: '目录就是分类（adb / 打包 / 巡检…），在磁盘上真实存在；支持任意层级',
       fields: [{ key: 'name', label: '目录名', placeholder: 'adb' }],
     });
     if (!f || !f.name) return;
     try {
       const r = await api('/api/scripts/folder', {
-        method: 'POST', body: { folder: cur, name: f.name },
+        method: 'POST', body: { folder: where, name: f.name },
       });
       toast(r.ok ? '已创建分类 ' + r.name : (r.error || '创建失败'), r.ok ? 'ok' : 'bad');
-      if (r.ok) go('system.scripts', { folder: r.rel });
-      else load(cur);
+      if (r.ok) {
+        opened.add(where || '');
+        go('system.scripts', { folder: r.rel });
+      } else load(cur);
     } catch (e) { toast(e.message, 'bad'); }
   }
 
@@ -4497,7 +4586,7 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
   }
 
   async function moveScript(it) {
-    const opts = folders.map((f) => ({ value: f.rel, label: f.name }));
+    const opts = flattenTree(treeData).map((f) => ({ value: f.rel, label: f.label }));
     const f = await formModal({
       title: '把 ' + it.name + ' 移到…',
       fields: [{ key: 'folder', label: '目标分类', type: 'select', options: opts, value: cur }],

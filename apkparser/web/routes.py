@@ -1261,9 +1261,15 @@ def h_scripts_list(ctx):
 
 @route("GET", r"/api/scripts/folders")
 def h_scripts_folders(ctx):
-    """所有分类目录（「移到…」下拉用）。"""
+    """所有分类目录（「移到…」下拉用，扁平列表）。"""
     return {"ok": True, "root": str(scripts_mod.library_root()),
             "folders": scripts_mod.folder_choices()}
+
+
+@route("GET", r"/api/scripts/tree")
+def h_scripts_tree(ctx):
+    """整棵目录树（侧栏多级层级，一次给全 → 展开不再发请求）。"""
+    return scripts_mod.folder_tree()
 
 
 @route("GET", r"/api/scripts/read")
@@ -1311,6 +1317,12 @@ def h_scripts_move(ctx):
 @route("POST", r"/api/scripts/note")
 def h_scripts_note(ctx):
     return scripts_mod.set_note(str(ctx.field("path", "")), str(ctx.field("note", "")))
+
+
+@route("POST", r"/api/scripts/alias")
+def h_scripts_alias(ctx):
+    """改**展示名**（别名），不动磁盘上的文件名。"""
+    return scripts_mod.set_alias(str(ctx.field("path", "")), str(ctx.field("alias", "")))
 
 
 @route("POST", r"/api/scripts/delete")
