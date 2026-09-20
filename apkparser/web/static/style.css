@@ -260,37 +260,66 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
   font-size: 11.5px; font-weight: 650; color: var(--dim);
   padding: 0 2px 8px; border-bottom: 1px solid var(--line-2); margin-bottom: 6px;
 }
-.scr-tree { display: flex; flex-direction: column; gap: 1px; }
-.scr-tree-b { display: flex; flex-direction: column; gap: 1px; }
+/* 层级展示的四条规则（上一版只靠 13px 缩进，中文名几乎看不出谁是谁的父级）：
+     ① 有子目录的**父节点字重 700、颜色最深**，叶子 400、颜色次一档
+     ② 越深字号越小（13 → 12.4 → 12）
+     ③ 每个子节点左侧有引导线（竖线跨行连成一条 + 指向自己的短线）
+     ④ 缩进与线位一起由 data-depth 给，行内不写间距 */
+.scr-tree { display: flex; flex-direction: column; }
+/* gap 必须是 0：行与行的竖线要连成一条，留缝就断成虚线了 */
+.scr-tree-b { display: flex; flex-direction: column; gap: 0; }
 .scr-tree-i {
+  position: relative;                  /* 引导线绝对定位，不占 flex 位 */
   display: flex; align-items: center; gap: 4px;
-  padding: 4px 6px; border-radius: 6px; cursor: pointer;
+  padding: 5px 6px; border-radius: 6px; cursor: pointer;
   font-size: 12.5px; color: var(--ink-2);
 }
+.scr-tree-i[data-has="1"] { font-weight: 700; color: var(--ink); }
+.scr-tree-i[data-has="0"] { font-weight: 400; color: var(--ink-2); }
 .scr-tree-i:hover { background: var(--panel-2); }
-.scr-tree-i.on { background: var(--brand-soft); color: var(--brand); font-weight: 650; }
+.scr-tree-i.on {
+  background: var(--brand-soft); color: var(--brand); font-weight: 650;
+  box-shadow: inset 2px 0 0 var(--brand);   /* 左侧色条：选中一眼可见 */
+}
+/* 缩进 + 引导线的横向位置（--tl 是那条竖线的 left） */
+.scr-tree-i[data-depth="0"] { padding-left: 6px; font-size: 13px; }
+.scr-tree-i[data-depth="1"] { padding-left: 19px; --tl: 12px; font-size: 13px; }
+.scr-tree-i[data-depth="2"] { padding-left: 32px; --tl: 25px; font-size: 12.4px; }
+.scr-tree-i[data-depth="3"] { padding-left: 45px; --tl: 38px; font-size: 12px; }
+.scr-tree-i[data-depth="4"] { padding-left: 58px; --tl: 51px; font-size: 12px; }
+.scr-tree-i[data-depth="5"] { padding-left: 71px; --tl: 64px; font-size: 12px; }
+.scr-tree-i[data-depth="6"] { padding-left: 84px; --tl: 77px; font-size: 12px; }
+.scr-tree-i[data-depth]:not([data-depth="0"])::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
+  left: var(--tl); background: var(--line-2);
+}
+.scr-tree-i[data-depth]:not([data-depth="0"])::before {
+  content: ''; position: absolute; top: 50%; height: 1px; width: 7px;
+  left: var(--tl); background: var(--line-2);
+}
 /* 展开箭头：没有子目录时也占位，名字才不会左右不齐 */
 .scr-tw {
   flex: 0 0 14px; width: 14px; text-align: center;
   background: none; border: none; padding: 0; cursor: pointer;
   color: var(--dim); font-size: 10px; line-height: 1;
+  transition: transform .12s ease;
 }
 .scr-tw:hover { color: var(--brand); }
 .scr-tw.none { cursor: default; }
-/* 层级缩进按 data-depth 给 —— 行内 padding 会让"间距只有一个来源"破掉 */
-.scr-tree-i[data-depth="0"] { padding-left: 6px; }
-.scr-tree-i[data-depth="1"] { padding-left: 19px; }
-.scr-tree-i[data-depth="2"] { padding-left: 32px; }
-.scr-tree-i[data-depth="3"] { padding-left: 45px; }
-.scr-tree-i[data-depth="4"] { padding-left: 58px; }
-.scr-tree-i[data-depth="5"] { padding-left: 71px; }
-.scr-tree-i[data-depth="6"] { padding-left: 84px; }
+/* 父节点的箭头更深更醒目，展开时同一个字符转 90° */
+.scr-tree-i[data-has="1"] .scr-tw { color: var(--ink-2); font-size: 11px; }
+.scr-tw.open { transform: rotate(90deg); color: var(--brand); }
 .scr-tree-n {
   background: none; border: none; padding: 0; cursor: pointer; text-align: left;
-  color: inherit; font: inherit;
+  color: inherit; font: inherit;      /* 字重/颜色继承行上的 data-has 规则 */
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.scr-tree-c { font-size: 10.5px; color: var(--dim); }
+/* 父节点显示子目录数（pill），叶子显示脚本数（淡数字）—— 又一处一眼可分的差别 */
+.scr-tree-c {
+  font-size: 10px; line-height: 15px; color: var(--ink-2);
+  background: var(--panel-2); border-radius: 8px; padding: 0 5px;
+}
+.scr-tree-i[data-has="0"] .scr-tree-c { background: none; color: var(--dim); padding: 0; }
 /* 「＋脚本 / ＋目录」只在悬停时出现：常显会把一栏挤成按钮墙 */
 .scr-tree-a {
   display: none; flex: 0 0 auto;

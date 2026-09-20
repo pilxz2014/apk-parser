@@ -4266,16 +4266,18 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
     const hasKids = kids.length > 0;
     const open = hasKids && (opened.has(node.rel || '') || onAncestor(node));
 
+    // data-has 让 CSS 能把「下面还有子目录的父节点」和「叶子」画成两种分量
     const row = el('div', {
       class: 'scr-tree-i' + (on ? ' on' : ''),
-      dataset: { depth: String(Math.min(depth, 6)) },
+      dataset: { depth: String(Math.min(depth, 6)), has: hasKids ? '1' : '0' },
       title: (node.rel || '脚本库根目录')
-        + '（' + (node.counts ? node.counts.scripts : 0) + ' 个脚本）',
+        + '（' + (node.counts ? node.counts.scripts : 0) + ' 个脚本'
+        + (hasKids ? '，' + kids.length + ' 个子目录' : '') + '）',
     });
 
     // 展开箭头：没有子目录就占位（保持缩进对齐，不然一列名字会歪）
     row.appendChild(el('button', {
-      class: 'scr-tw' + (hasKids ? '' : ' none'),
+      class: 'scr-tw' + (hasKids ? (open ? ' open' : '') : ' none'),
       onclick: (e) => {
         e.stopPropagation();
         if (!hasKids) return;
@@ -4283,14 +4285,16 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
         else opened.add(node.rel || '');
         renderTree();
       },
-    }, hasKids ? (open ? '▾' : '▸') : ''));
+    }, hasKids ? '▸' : ''));
 
     row.appendChild(el('button', {
       class: 'scr-tree-n',
       onclick: () => { if (!on) go('system.scripts', { folder: node.rel || '' }); },
     }, (node.name || '脚本库')));
 
-    if (hasKids) row.appendChild(el('span', { class: 'scr-tree-c' }, String(kids.length)));
+    // 父节点挂子目录数（画成 pill），叶子挂脚本数（淡数字）
+    const n = hasKids ? kids.length : ((node.counts && node.counts.scripts) || 0);
+    if (n) row.appendChild(el('span', { class: 'scr-tree-c' }, String(n)));
 
     // 悬停出现的两个小按钮：**在这一级**新建脚本 / 子目录（任意层级都能加）
     row.appendChild(el('span', { class: 'scr-sp' }));
