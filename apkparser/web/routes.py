@@ -32,6 +32,7 @@ from ..core.install import errors as err_mod
 from ..core.install import installer
 from ..core.install import precheck as precheck_mod
 from ..core.launch import components as comp_mod
+from ..core import scripts as scripts_mod
 from ..core.launch import history as hist_mod
 from ..core.launch.intent import COMMON_ACTIONS, COMMON_FLAGS, Intent, flag_catalog
 from ..platform import filedialog as filedialog_mod
@@ -1248,6 +1249,105 @@ def h_files_push(ctx):
 def h_files_pull(ctx):
     return files_mod.pull(str(ctx.field("src", "")), str(ctx.field("dst", "")),
                           ctx.field("device", ""))
+
+
+# ---------------------------------------------------------------- 脚本存档库
+
+@route("GET", r"/api/scripts")
+def h_scripts_list(ctx):
+    """列脚本库的一个目录（文件夹 + 脚本，带备注与子信息）。"""
+    return scripts_mod.list_dir(ctx.q("folder", ""))
+
+
+@route("GET", r"/api/scripts/folders")
+def h_scripts_folders(ctx):
+    """所有分类目录（「移到…」下拉用）。"""
+    return {"ok": True, "root": str(scripts_mod.library_root()),
+            "folders": scripts_mod.folder_choices()}
+
+
+@route("GET", r"/api/scripts/read")
+def h_scripts_read(ctx):
+    return scripts_mod.read_script(ctx.q("path", ""))
+
+
+@route("POST", r"/api/scripts/folder")
+def h_scripts_mkdir(ctx):
+    return scripts_mod.make_folder(str(ctx.field("folder", "")),
+                                   str(ctx.field("name", "")))
+
+
+@route("POST", r"/api/scripts/new")
+def h_scripts_new(ctx):
+    return scripts_mod.create(str(ctx.field("folder", "")), str(ctx.field("name", "")),
+                              str(ctx.field("kind", "bat") or "bat"),
+                              str(ctx.field("text", "")))
+
+
+@route("POST", r"/api/scripts/add")
+def h_scripts_add(ctx):
+    """把本机已有脚本**复制**进库（原文件不动）。"""
+    return scripts_mod.add_existing(str(ctx.field("src", "")),
+                                    str(ctx.field("folder", "")),
+                                    str(ctx.field("name", "")))
+
+
+@route("POST", r"/api/scripts/save")
+def h_scripts_save(ctx):
+    return scripts_mod.write_script(str(ctx.field("path", "")),
+                                    str(ctx.field("text", "")))
+
+
+@route("POST", r"/api/scripts/rename")
+def h_scripts_rename(ctx):
+    return scripts_mod.rename(str(ctx.field("path", "")), str(ctx.field("name", "")))
+
+
+@route("POST", r"/api/scripts/move")
+def h_scripts_move(ctx):
+    return scripts_mod.move(str(ctx.field("path", "")), str(ctx.field("folder", "")))
+
+
+@route("POST", r"/api/scripts/note")
+def h_scripts_note(ctx):
+    return scripts_mod.set_note(str(ctx.field("path", "")), str(ctx.field("note", "")))
+
+
+@route("POST", r"/api/scripts/delete")
+def h_scripts_delete(ctx):
+    return scripts_mod.delete(str(ctx.field("path", "")))
+
+
+@route("POST", r"/api/scripts/run")
+def h_scripts_run(ctx):
+    """跑一个脚本，把输出带回来（同步等待，默认 120s 上限）。"""
+    return scripts_mod.run(str(ctx.field("path", "")), str(ctx.field("args", "")),
+                           float(ctx.field("timeout", 0) or 0) or 120.0)
+
+
+@route("POST", r"/api/sys/pickfile")
+def h_sys_pickfile(ctx):
+    """弹原生**文件**对话框（添加现有脚本时用）。
+
+    和 `/api/apk/pick` 的区别只有默认过滤器：那里只认 APK，这里按调用方
+    给的 `types` 走（不给就是所有文件）。
+    """
+    types = ctx.field("types", None)
+    ft = None
+    if isinstance(types, list) and types:
+        ft = [(str(t[0]), str(t[1])) for t in types if isinstance(t, (list, tuple)) and len(t) >= 2]
+    r = filedialog_mod.pick_file(
+        title=str(ctx.field("title", "") or "选择文件"),
+        initial_dir=str(ctx.field("start", "") or ""),
+        filetypes=ft or scripts_mod.SCRIPT_TYPES)
+    if not r.get("ok"):
+        return {"ok": False, "fallback": "inpage", "backend": None,
+                "tried": r.get("tried") or [],
+                "error": r.get("error") or "无法弹出文件对话框"}
+    p = str(r.get("path") or "").strip()
+    if not p:
+        return {"ok": False, "cancelled": True, "error": "未选择文件"}
+    return {"ok": True, "path": p, "name": Path(p).name, "backend": r.get("backend")}
 
 
 # ---------------------------------------------------------------- 菜单注入

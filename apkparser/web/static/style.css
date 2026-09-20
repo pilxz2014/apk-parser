@@ -242,6 +242,85 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
 .stack-act-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 7px; }
 .stack-comp { font-size: 12.5px; word-break: break-all; }
 
+/* ---------------------------------------------------------- 脚本存档库
+
+   左栏「分类」+ 右栏「脚本列表」。列表用卡片而不是表格：
+   一条脚本要同时带  名称 / 类型 / 备注 / 大小·行数·时间 / 将如何运行，
+   塞进表格列会挤成一团，卡片能一行一样地铺开。
+*/
+.scr-wrap { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 14px; margin-top: 12px; }
+@media (max-width: 900px) { .scr-wrap { grid-template-columns: 1fr; } }
+
+.scr-side {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); padding: 10px; align-self: start;
+}
+.scr-side-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  font-size: 11.5px; font-weight: 650; color: var(--dim);
+  padding: 0 2px 8px; border-bottom: 1px solid var(--line-2); margin-bottom: 6px;
+}
+.scr-tree { display: flex; flex-direction: column; gap: 1px; }
+.scr-tree-i {
+  padding: 5px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 12.5px; color: var(--ink-2); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.scr-tree-i:hover { background: var(--panel-2); }
+.scr-tree-i.on { background: var(--brand-soft); color: var(--brand); font-weight: 650; }
+/* 层级缩进按 data-depth 给 —— 行内 padding 会让"间距只有一个来源"破掉 */
+.scr-tree-i[data-depth="0"] { padding-left: 8px; }
+.scr-tree-i[data-depth="1"] { padding-left: 21px; }
+.scr-tree-i[data-depth="2"] { padding-left: 34px; }
+.scr-tree-i[data-depth="3"] { padding-left: 47px; }
+.scr-tree-i[data-depth="4"] { padding-left: 60px; }
+.scr-tree-n { overflow: hidden; text-overflow: ellipsis; }
+
+.scr-main { min-width: 0; }
+.scr-crumb { display: flex; align-items: center; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
+.scr-crumb-i { font-size: 12.5px; color: var(--brand); cursor: pointer; }
+.scr-crumb-i.on { color: var(--ink); font-weight: 650; cursor: default; }
+.scr-crumb-s { color: var(--dim); font-size: 12px; }
+
+.scr-list { display: flex; flex-direction: column; gap: 9px; }
+.scr-item {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); padding: 10px 12px;
+}
+.scr-item:hover { border-color: #cfd8e3; }
+.scr-dir { background: var(--panel-2); }
+.scr-item-hd { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+/* 点名字就跑 —— 做成按钮样子，但视觉上就是这一行的标题 */
+.scr-name {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--ink); font-size: 13.5px; font-weight: 650; text-align: left;
+}
+.scr-name:hover { color: var(--brand); text-decoration: underline; }
+.scr-sp { flex: 1 1 auto; }
+.scr-meta { font-size: 11.5px; color: var(--dim); margin-top: 5px; }
+.scr-note { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
+.scr-sum { font-size: 12px; color: var(--dim); margin-top: 3px; font-style: italic; }
+.scr-cmd { font-size: 11.5px; color: var(--dim); margin-top: 5px; word-break: break-all; }
+
+.scr-root { font-size: 12px; color: var(--ink-2); word-break: break-all; }
+
+.scr-edit {
+  width: 100%; min-height: 240px; resize: vertical;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+  background: var(--panel-2); color: var(--ink);
+}
+.scr-edit-label { font-size: 11.5px; color: var(--dim); margin-bottom: 6px; }
+.scr-hint { font-size: 12px; color: var(--ink-2); margin-bottom: 10px; }
+
+.scr-run-hd { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; font-size: 12.5px; }
+.scr-out {
+  margin: 8px 0 0; padding: 10px 12px; max-height: 46vh; overflow: auto;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-all;
+}
+
 /* 键值表 */
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; }
 .kv dt { color: var(--dim); font-size: 12.5px; }

@@ -211,6 +211,124 @@ function ask({ title, message, placeholder = '', value = '', action = '确定' }
   });
 }
 
+/**
+ * 多行文本输入（脚本编辑 / 写备注）。
+ * Ctrl+Enter = 保存；Esc / 取消 = 返回 null。
+ */
+function textModal({ title, label = '', value = '', action = '保存',
+                     rows = 20, placeholder = '' }) {
+  return new Promise((resolve) => {
+    const ta = el('textarea', {
+      class: 'mono scr-edit', rows: String(rows), placeholder, spellcheck: 'false',
+    });
+    ta.value = value || '';
+    const done = (v) => { m.close(); resolve(v); };
+    const m = modal({
+      title, wide: true,
+      body: el('div', {},
+        label ? el('div', { class: 'scr-edit-label' }, label) : null,
+        ta),
+      foot: el('div', { style: { display: 'flex', gap: '8px' } },
+        el('button', { class: 'btn', onclick: () => done(null) }, '取消'),
+        el('button', { class: 'btn primary', onclick: () => done(ta.value) }, action)),
+    });
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(ta.value); }
+      else if (e.key === 'Escape') done(null);
+    });
+    setTimeout(() => {
+      ta.focus();
+      try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (_) { /* 某些浏览器不支持 */ }
+    }, 30);
+  });
+}
+
+/** 通用小表单（新建 / 重命名 / 移到都用它，省得每种交互写一个 modal）。 */
+function formModal({ title, fields = [], action = '确定', hint = '' }) {
+  return new Promise((resolve) => {
+    const inputs = {};
+    const rows = fields.map((f) => {
+      let inp;
+      if (f.type === 'select') {
+        inp = el('select', {}, ...(f.options || []).map(
+          (o) => el('option', { value: o.value }, o.label)));
+        inp.value = f.value != null ? f.value : ((f.options || [])[0] || {}).value || '';
+      } else {
+        inp = el('input', {
+          type: 'text', class: f.mono === false ? '' : 'mono',
+          placeholder: f.placeholder || '',
+        });
+        inp.value = f.value || '';
+      }
+      inputs[f.key] = inp;
+      return el('div', { class: 'field' }, el('label', {}, f.label), inp);
+    });
+    const go = () => {
+      const out = {};
+      for (const f of fields) out[f.key] = String(inputs[f.key].value || '').trim();
+      m.close();
+      resolve(out);
+    };
+    const m = modal({
+      title,
+      body: el('div', {},
+        hint ? el('div', { class: 'scr-hint' }, hint) : null,
+        ...rows),
+      foot: el('div', { style: { display: 'flex', gap: '8px' } },
+        el('button', { class: 'btn', onclick: () => { m.close(); resolve(null); } }, '取消'),
+        el('button', { class: 'btn primary', onclick: go }, action)),
+    });
+    if (fields.length) setTimeout(() => { try { inputs[fields[0].key].focus(); } catch (_) { } }, 30);
+  });
+}
+
+/** 一句确认（confirmTyping 是"敲一遍包名"专用的，这里只是问一句）。 */
+function confirmBox({ title, message, action = '确定', danger = true }) {
+  return new Promise((resolve) => {
+    const m = modal({
+      title,
+      body: el('div', { class: 'notice ' + (danger ? 'bad' : 'warn') }, message),
+      foot: el('div', { style: { display: 'flex', gap: '8px' } },
+        el('button', { class: 'btn', onclick: () => { m.close(); resolve(false); } }, '取消'),
+        el('button', {
+          class: 'btn ' + (danger ? 'danger' : 'primary'),
+          onclick: () => { m.close(); resolve(true); },
+        }, action)),
+    });
+  });
+}
+
+/** 用原生对话框选一个本机文件（脚本库「添加现有」用）。不可用 → 返回 null。 */
+async function pickLocalFile({ title = '选择脚本文件', start = '' } = {}) {
+  const r = await api('/api/sys/pickfile', {
+    method: 'POST', body: { title, start },
+  }).catch(() => null);
+  if (r && r.ok && r.path) return r.path;
+  return null;
+}
+
+/**
+ * 浏览器里选文件并**读内容**（原生对话框不可用时的降级）。
+ *
+ * 浏览器拿不到真实路径，但脚本是文本 —— 读内容再发给服务端照样能存档，
+ * 只是丢了原文件的位置而已（对"存一份进来用"这个目的没影响）。
+ */
+function readFileInBrowser(accept = '.bat,.cmd,.sh,.bash,.ps1,.py,.txt') {
+  return new Promise((resolve) => {
+    const inp = el('input', { type: 'file', accept, style: { display: 'none' } });
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0];
+      if (!f) { inp.remove(); resolve(null); return; }
+      const fr = new FileReader();
+      fr.onload = () => { inp.remove(); resolve({ name: f.name, text: String(fr.result || '') }); };
+      fr.onerror = () => { inp.remove(); resolve(null); };
+      fr.readAsText(f, 'utf-8');
+    });
+    document.body.appendChild(inp);
+    inp.click();
+  });
+}
+
 /* ================================================================ UI 原语 */
 
 function card(title, sub, ...body) {
@@ -4061,6 +4179,357 @@ VIEWS['device.files'] = async function (host, cap, q) {
     aliasBox));
   host.appendChild(card(null, null, treeBox));
   ls();
+};
+
+/* ------------------------------------------------ 脚本存档库
+
+   交互的三条原则：
+     ① **点名字就跑** —— 收藏脚本就是为了不用再敲命令，中间多一次确认就是白收藏
+     ② **分类靠目录，不靠标签** —— 目录在磁盘上真实存在，备份/复制/命令行里都能用
+     ③ **备注写在库里，不写进脚本文件** —— 脚本本身保持干净，拷给别人不带一堆注解
+*/
+VIEWS['system.scripts'] = async function (host, cap, q) {
+  let cur = q.folder || '';
+  let data = null;
+  let folders = [];
+
+  const kw = el('input', { type: 'search', placeholder: '按名称 / 备注 / 摘要过滤…' });
+  const tree = el('div', { class: 'scr-tree' });
+  const crumb = el('div', { class: 'scr-crumb' });
+  const list = el('div', { class: 'scr-list' });
+  const rootPath = el('span', { class: 'mono scr-root' });
+
+  host.appendChild(card('脚本存档',
+    '收进来的脚本是**副本**，原文件不会被移动或改动；点名字直接运行，备注存在库里不写进脚本文件',
+    el('div', { class: 'row' },
+      el('div', { class: 'grow' }, kw),
+      el('button', { class: 'btn primary', onclick: () => newScript() }, '+ 新建脚本'),
+      el('button', { class: 'btn', onclick: () => addExisting() }, '添加现有脚本'),
+      el('button', { class: 'btn', onclick: () => newFolder() }, '+ 分类目录')),
+    el('div', { class: 'row', style: { marginTop: '8px' } },
+      el('span', { style: { color: 'var(--dim)' } }, '库目录：'),
+      rootPath,
+      el('button', { class: 'btn sm', onclick: () => copyText(rootPath.textContent) }, '复制'))));
+
+  host.appendChild(el('div', { class: 'scr-wrap' },
+    el('div', { class: 'scr-side' },
+      el('div', { class: 'scr-side-hd' },
+        el('span', {}, '分类'),
+        el('button', { class: 'btn sm', onclick: () => newFolder() }, '+')),
+      tree),
+    el('div', { class: 'scr-main' }, crumb, list)));
+
+  kw.addEventListener('input', () => paint());
+
+  // ---- 数据 ----
+
+  async function load(folder) {
+    cur = folder || '';
+    list.innerHTML = '';
+    list.appendChild(spinner('读取脚本库…'));
+    try {
+      const [d, f] = await Promise.all([
+        api('/api/scripts', { params: { folder: cur } }),
+        api('/api/scripts/folders').catch(() => ({ ok: false })),
+      ]);
+      data = d;
+      folders = (f && f.folders) || [];
+      rootPath.textContent = d.root || '';
+      renderTree();
+      paint();
+    } catch (e) {
+      data = null;
+      list.innerHTML = '';
+      list.appendChild(notice('bad', e.message));
+    }
+  }
+
+  function renderTree() {
+    tree.innerHTML = '';
+    tree.appendChild(treeItem({ name: '脚本库', rel: '' }, 0));
+    for (const f of folders) {
+      if (!f.rel) continue;
+      const depth = f.rel.split('/').length - 1;
+      tree.appendChild(treeItem({ name: f.rel.split('/').pop(), rel: f.rel }, depth));
+    }
+  }
+
+  function treeItem(f, depth) {
+    const on = f.rel === cur;
+    // 缩进交给 CSS（`[data-depth]`）—— 行内写间距会让"间距只有一个来源"这条破掉
+    return el('div', {
+      class: 'scr-tree-i' + (on ? ' on' : ''),
+      dataset: { depth: String(Math.min(depth, 4)) },
+      onclick: () => { if (!on) go('system.scripts', { folder: f.rel }); },
+      title: f.rel || '脚本库根目录',
+    }, el('span', { class: 'scr-tree-n' }, f.name));
+  }
+
+  function paint() {
+    list.innerHTML = '';
+    if (!data || !data.ok) {
+      list.appendChild(notice('bad', (data && data.error) || '读取脚本库失败'));
+      return;
+    }
+    // 面包屑
+    crumb.innerHTML = '';
+    (data.crumbs || []).forEach((c, i) => {
+      if (i) crumb.appendChild(el('span', { class: 'scr-crumb-s' }, '›'));
+      const last = i === (data.crumbs || []).length - 1;
+      crumb.appendChild(el('span', {
+        class: 'scr-crumb-i' + (last ? ' on' : ''),
+        onclick: () => { if (!last) go('system.scripts', { folder: c.rel }); },
+      }, c.name));
+    });
+
+    const k = kw.value.trim().toLowerCase();
+    const items = (data.items || []).filter((it) => !k
+      || (it.name + ' ' + (it.note || '') + ' ' + (it.summary || '')).toLowerCase().indexOf(k) >= 0);
+    const subs = (data.folders || []).filter((f) => !k || f.name.toLowerCase().indexOf(k) >= 0);
+
+    if (!items.length && !subs.length) {
+      list.appendChild(emptyState('📜', k ? '没有匹配的脚本' : '这个分类还是空的 —— 「+ 新建脚本」或「添加现有脚本」'));
+      return;
+    }
+    for (const f of subs) list.appendChild(folderRow(f));
+    for (const it of items) list.appendChild(itemRow(it));
+  }
+
+  function folderRow(f) {
+    return el('div', { class: 'scr-item scr-dir' },
+      el('div', { class: 'scr-item-hd' },
+        el('button', {
+          class: 'scr-name',
+          onclick: () => go('system.scripts', { folder: f.rel }),
+        }, '📁 ' + f.name),
+        tag('分类', 'plain'),
+        el('span', { class: 'scr-sp' }),
+        el('span', { class: 'scr-meta' }, (f.count || 0) + ' 项'),
+        el('button', { class: 'btn sm', onclick: () => renamePath(f.rel, f.name, true) }, '重命名'),
+        el('button', {
+          class: 'btn sm danger',
+          onclick: () => delPath(f.rel, f.name, true),
+        }, '删除')));
+  }
+
+  function itemRow(it) {
+    const hd = el('div', { class: 'scr-item-hd' },
+      el('button', {
+        class: 'scr-name mono',
+        title: '点击运行：' + (it.command || ''),
+        onclick: () => runScript(it),
+      }, it.name),
+      tag(it.kindText || '文本', it.runnable ? 'ok' : 'plain'),
+      it.runs ? tag('跑过 ' + it.runs + ' 次', 'plain') : null,
+      it.lastRun ? el('span', { class: 'scr-meta' }, '上次 ' + fmtAgo(it.lastRun)) : null,
+      el('span', { class: 'scr-sp' }),
+      el('button', { class: 'btn sm primary', onclick: () => runScript(it) }, '运行'),
+      el('button', { class: 'btn sm', onclick: () => editScript(it) }, '编辑'),
+      el('button', { class: 'btn sm', onclick: () => noteScript(it) }, '备注'),
+      el('button', { class: 'btn sm', onclick: () => renamePath(it.rel, it.name, false) }, '重命名'),
+      el('button', { class: 'btn sm', onclick: () => moveScript(it) }, '移到'),
+      el('button', { class: 'btn sm danger', onclick: () => delPath(it.rel, it.name, false) }, '删除'));
+
+    const meta = el('div', { class: 'scr-meta' },
+      fmtBytes(it.size), ' · ', (it.lines || 0) + ' 行', ' · ',
+      (it.encoding || 'utf-8').toUpperCase(), ' · 改于 ', fmtAgo(it.mtime),
+      it.runnable ? '' : ' · 当前系统不能直接运行');
+
+    const sub = it.note
+      ? el('div', { class: 'scr-note' }, '备注：' + it.note)
+      : (it.summary ? el('div', { class: 'scr-sum' }, it.summary) : null);
+
+    return el('div', { class: 'scr-item' }, hd, meta, sub,
+      el('div', { class: 'scr-cmd mono' }, it.command || ''));
+  }
+
+  // ---- 动作 ----
+
+  async function runScript(it) {
+    const box = el('div', {}, el('div', { class: 'scr-run-hd' }, '运行中…'));
+    const m = modal({ title: '运行 ' + it.name, wide: true, body: box });
+    try {
+      const r = await api('/api/scripts/run', { method: 'POST', body: { path: it.rel } });
+      box.innerHTML = '';
+      box.appendChild(el('div', { class: 'scr-run-hd' },
+        tag(r.ok ? '成功' : '失败', r.ok ? 'ok' : 'bad'),
+        el('span', { class: 'mono' }, '退出码 ' + r.rc),
+        el('span', {}, (r.seconds || 0) + ' 秒'),
+        r.timedOut ? tag('超时被中止', 'bad') : null));
+      if (r.command) box.appendChild(codeBlock(r.command));
+      box.appendChild(el('pre', { class: 'scr-out' }, r.output || '（没有输出）'));
+      if (r.error && !r.ok) box.appendChild(notice('bad', r.error));
+      load(cur);
+    } catch (e) {
+      box.innerHTML = '';
+      box.appendChild(notice('bad', e.message));
+    }
+    void m;
+  }
+
+  async function editScript(it) {
+    let r;
+    try {
+      r = await api('/api/scripts/read', { params: { path: it.rel } });
+    } catch (e) { toast(e.message, 'bad'); return; }
+    if (!r.ok) { toast(r.error || '读取失败', 'bad'); return; }
+    const text = await textModal({
+      title: '编辑 ' + r.name,
+      value: r.text,
+      label: '编码：' + (r.encoding || 'utf-8') + ' —— 保存时按原编码写回（Windows 的 .bat 常见 GBK，不会被动成 UTF-8）',
+      rows: 22,
+    });
+    if (text == null) return;
+    try {
+      const s = await api('/api/scripts/save', { method: 'POST', body: { path: it.rel, text } });
+      toast(s.ok ? '已保存' : (s.error || '保存失败'), s.ok ? 'ok' : 'bad');
+      if (s.ok) load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function noteScript(it) {
+    const note = await textModal({
+      title: '备注 · ' + it.name,
+      value: it.note || '',
+      label: '写清楚"这个脚本是干嘛的、跑之前要注意什么"（存在库里，不会写进脚本文件）',
+      rows: 4,
+      placeholder: '例：登录模块冒烟，跑之前先装测试包',
+    });
+    if (note == null) return;
+    try {
+      const r = await api('/api/scripts/note', { method: 'POST', body: { path: it.rel, note } });
+      toast(r.ok ? '备注已保存' : (r.error || '保存失败'), r.ok ? 'ok' : 'bad');
+      if (r.ok) load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function newScript() {
+    const f = await formModal({
+      title: '新建脚本',
+      hint: '名字不用带扩展名，会按类型自动补',
+      fields: [
+        { key: 'name', label: '脚本名', placeholder: 'restart-adb' },
+        {
+          key: 'kind', label: '类型', type: 'select', value: 'bat',
+          options: [
+            { value: 'bat', label: '批处理 .bat（Windows）' },
+            { value: 'sh', label: 'Shell .sh（macOS / Linux）' },
+            { value: 'ps1', label: 'PowerShell .ps1' },
+            { value: 'py', label: 'Python .py' },
+          ],
+        },
+      ],
+    });
+    if (!f || !f.name) return;
+    try {
+      const r = await api('/api/scripts/new', {
+        method: 'POST', body: { folder: cur, name: f.name, kind: f.kind },
+      });
+      if (!r.ok) { toast(r.error || '创建失败', 'bad'); return; }
+      toast('已创建 ' + r.name, 'ok');
+      // 建完直接进编辑器 —— 新建就是为了马上写内容
+      await load(cur);
+      const it = (data && data.items || []).find((x) => x.rel === r.rel);
+      if (it) editScript(it);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function newFolder() {
+    const f = await formModal({
+      title: '新建分类目录',
+      hint: '目录就是分类（adb / 打包 / 巡检…），在磁盘上真实存在',
+      fields: [{ key: 'name', label: '目录名', placeholder: 'adb' }],
+    });
+    if (!f || !f.name) return;
+    try {
+      const r = await api('/api/scripts/folder', {
+        method: 'POST', body: { folder: cur, name: f.name },
+      });
+      toast(r.ok ? '已创建分类 ' + r.name : (r.error || '创建失败'), r.ok ? 'ok' : 'bad');
+      if (r.ok) go('system.scripts', { folder: r.rel });
+      else load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function addExisting() {
+    const src = await pickLocalFile({ title: '选择要收进来的脚本', start: '' });
+    if (src) {
+      try {
+        const r = await api('/api/scripts/add', {
+          method: 'POST', body: { src, folder: cur },
+        });
+        toast(r.ok ? '已收进脚本库：' + r.name : (r.error || '添加失败'), r.ok ? 'ok' : 'bad');
+        if (r.ok) load(cur);
+      } catch (e) { toast(e.message, 'bad'); }
+      return;
+    }
+    // 原生对话框不可用 → 退到浏览器选文件（读内容照样能存档，只是不知道原位置）
+    const picked = await readFileInBrowser();
+    if (!picked) return;
+    const f = await formModal({
+      title: '收进脚本库：' + picked.name,
+      hint: '浏览器不给文件的真实路径，这里按内容存一份；名字可以改',
+      fields: [{ key: 'name', label: '存为', value: picked.name }],
+    });
+    if (!f || !f.name) return;
+    try {
+      const r = await api('/api/scripts/new', {
+        method: 'POST', body: { folder: cur, name: f.name, text: picked.text },
+      });
+      toast(r.ok ? '已收进脚本库：' + r.name : (r.error || '添加失败'), r.ok ? 'ok' : 'bad');
+      if (r.ok) load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function renamePath(rel, name, isDir) {
+    const f = await formModal({
+      title: '重命名' + (isDir ? '分类目录' : '脚本'),
+      fields: [{ key: 'name', label: '新名字', value: name }],
+    });
+    if (!f || !f.name) return;
+    try {
+      const r = await api('/api/scripts/rename', {
+        method: 'POST', body: { path: rel, name: f.name },
+      });
+      toast(r.ok ? '已改名为 ' + r.name : (r.error || '重命名失败'), r.ok ? 'ok' : 'bad');
+      load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function moveScript(it) {
+    const opts = folders.map((f) => ({ value: f.rel, label: f.name }));
+    const f = await formModal({
+      title: '把 ' + it.name + ' 移到…',
+      fields: [{ key: 'folder', label: '目标分类', type: 'select', options: opts, value: cur }],
+    });
+    if (!f) return;
+    try {
+      const r = await api('/api/scripts/move', {
+        method: 'POST', body: { path: it.rel, folder: f.folder },
+      });
+      toast(r.ok ? '已移到 ' + (f.folder || '脚本库') : (r.error || '移动失败'),
+        r.ok ? 'ok' : 'bad');
+      if (r.ok) load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  async function delPath(rel, name, isDir) {
+    const ok = await confirmBox({
+      title: '删除' + (isDir ? '分类目录' : '脚本'),
+      message: isDir
+        ? ('将删除分类「' + name + '」以及里面的所有脚本（只是库里的副本，原文件不受影响）。')
+        : ('将删除脚本「' + name + '」（只是库里的副本，原文件不受影响）。'),
+      action: '删除',
+    });
+    if (!ok) return;
+    try {
+      const r = await api('/api/scripts/delete', { method: 'POST', body: { path: rel } });
+      toast(r.ok ? '已删除' : (r.error || '删除失败'), r.ok ? 'ok' : 'bad');
+      load(cur);
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+
+  load(cur);
 };
 
 /* ------------------------------------------------ 系统 */

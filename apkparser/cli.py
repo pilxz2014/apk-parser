@@ -545,6 +545,96 @@ def cmd_device_tools(ns) -> int:
     return 0 if res.get("ok") else 1
 
 
+def cmd_script(ns) -> int:
+    """脚本存档库：list / add / new / show / note / rename / rm / run。"""
+    from .core import scripts as smod
+    op = ns.op
+
+    def out(res, ok=None):
+        if ns.json:
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+            return 0 if (ok if ok is not None else res.get("ok")) else 1
+        if not res.get("ok"):
+            return fail(res.get("error") or "失败", ns.json)
+        return 0
+
+    if op == "list":
+        r = smod.list_dir(getattr(ns, "folder", "") or "")
+        if ns.json:
+            return out(r)
+        if not r.get("ok"):
+            return fail(r.get("error"), ns.json)
+        console.banner("脚本库", r.get("absPath", ""))
+        for f in r.get("folders", []):
+            console.info("  [目录] %-30s %d 项" % (f["name"] + "/", f["count"]))
+        rows = [[i["name"], i["kindText"], i["size"], i.get("note") or i.get("summary") or "-"]
+                for i in r.get("items", [])]
+        if rows:
+            console.table(["名称", "类型", "字节", "备注 / 摘要"], rows,
+                          max_widths=[34, 10, 10, 40])
+        console.info("共 %d 个目录 / %d 个脚本"
+                     % (r.get("counts", {}).get("folders", 0),
+                        r.get("counts", {}).get("scripts", 0)))
+        return 0
+
+    if op == "add":
+        r = smod.add_existing(ns.src, getattr(ns, "folder", "") or "")
+        if not ns.json and r.get("ok"):
+            console.ok("已收进脚本库：%s" % r.get("rel"))
+        return out(r)
+
+    if op == "new":
+        r = smod.create(getattr(ns, "folder", "") or "", ns.name, getattr(ns, "kind", "bat"))
+        if not ns.json and r.get("ok"):
+            console.ok("已新建：%s（%s）" % (r.get("rel"), r.get("absPath")))
+        return out(r)
+
+    if op == "show":
+        r = smod.read_script(ns.path)
+        if ns.json:
+            return out(r)
+        if not r.get("ok"):
+            return fail(r.get("error"), ns.json)
+        console.banner(r.get("name"), "%s · %s 字节 · %s 行"
+                       % (r.get("encoding"), r.get("size"), len((r.get("text") or "").splitlines())))
+        if r.get("note"):
+            console.info("备注：" + r["note"])
+        print(r.get("text") or "")
+        return 0
+
+    if op == "note":
+        r = smod.set_note(ns.path, ns.text)
+        if not ns.json and r.get("ok"):
+            console.ok("备注已保存：%s" % r.get("rel"))
+        return out(r)
+
+    if op == "rename":
+        r = smod.rename(ns.path, ns.name)
+        if not ns.json and r.get("ok"):
+            console.ok("已改名为：%s" % r.get("name"))
+        return out(r)
+
+    if op == "rm":
+        r = smod.delete(ns.path)
+        if not ns.json and r.get("ok"):
+            console.ok("已删除 %s 个文件：%s" % (r.get("deleted"), ns.path))
+        return out(r)
+
+    # run
+    if ns.json:
+        r = smod.run(ns.path, " ".join(ns.args or []), getattr(ns, "timeout", 120.0))
+        return out(r)
+    console.hint("运行：" + ns.path)
+    r = smod.run(ns.path, " ".join(ns.args or []), getattr(ns, "timeout", 120.0))
+    if not r.get("ok") and r.get("error") and not r.get("output"):
+        return fail(r.get("error"), ns.json)
+    if r.get("output"):
+        print(r["output"])
+    console.hint("退出码 %s · 耗时 %.2fs · 已跑 %s 次"
+                 % (r.get("rc"), r.get("seconds", 0), r.get("runs", 0)))
+    return 0 if r.get("ok") else 1
+
+
 def cmd_device_stack(ns) -> int:
     """当前 Activity 堆栈。
 
@@ -1612,6 +1702,41 @@ def build_parser() -> argparse.ArgumentParser:
                    help="cascade=一个「APK 工具」级联菜单（默认）；"
                         "flat=各项平铺在 .apk 菜单里（保底，一定能显示）")
     c.set_defaults(handler=cmd_sys_menu)
+
+    # ---- script（脚本存档库）----
+    scp = sub.add_parser("script", help="脚本存档库（bat / sh）")
+    sc = scp.add_subparsers(dest="cmd", metavar="<cmd>")
+    c = _add_common(sc.add_parser("list", help="列出脚本库（默认根目录）"), device=False)
+    c.add_argument("--folder", default="", help="子目录（分类）")
+    c.set_defaults(handler=cmd_script, op="list")
+    c = _add_common(sc.add_parser("add", help="把本机脚本复制进库"), device=False)
+    c.add_argument("src")
+    c.add_argument("--folder", default="")
+    c.set_defaults(handler=cmd_script, op="add")
+    c = _add_common(sc.add_parser("new", help="新建脚本"), device=False)
+    c.add_argument("name")
+    c.add_argument("--folder", default="")
+    c.add_argument("--kind", default="bat", choices=["bat", "sh", "ps1", "py"])
+    c.set_defaults(handler=cmd_script, op="new")
+    c = _add_common(sc.add_parser("show", help="查看脚本内容"), device=False)
+    c.add_argument("path")
+    c.set_defaults(handler=cmd_script, op="show")
+    c = _add_common(sc.add_parser("note", help="写备注"), device=False)
+    c.add_argument("path")
+    c.add_argument("text", nargs="?", default="")
+    c.set_defaults(handler=cmd_script, op="note")
+    c = _add_common(sc.add_parser("rename", help="重命名"), device=False)
+    c.add_argument("path")
+    c.add_argument("name")
+    c.set_defaults(handler=cmd_script, op="rename")
+    c = _add_common(sc.add_parser("rm", help="删除脚本 / 分类目录"), device=False)
+    c.add_argument("path")
+    c.set_defaults(handler=cmd_script, op="rm")
+    c = _add_common(sc.add_parser("run", help="运行脚本"), device=False)
+    c.add_argument("path")
+    c.add_argument("args", nargs="*")
+    c.add_argument("--timeout", type=float, default=120.0)
+    c.set_defaults(handler=cmd_script, op="run")
 
     # ---- web ----
     wp = sub.add_parser("web", help="主控台")

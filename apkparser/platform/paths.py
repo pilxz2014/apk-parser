@@ -124,6 +124,16 @@ def parse_cache_dir() -> Path:
     return _ensure(cache_dir() / "parse")
 
 
+def scripts_dir() -> Path:
+    """脚本存档库（用户级）。
+
+    为什么不放源码树里：那是**用户自己收进来的脚本**（adb 巡检、打包、
+    冒烟…），不是本工程的资产。放源码树会跟着 git 走、升级时被覆盖，
+    而根目录已经有个 `scripts/`（右键菜单用的平台薄壳），重名只会添乱。
+    """
+    return _ensure(_cfg_override("scripts_dir", config_dir() / "scripts"))
+
+
 def tmp_dir() -> Path:
     """临时文件（弹窗卡片 HTML 等，可随时清）。"""
     return _ensure(project_root() / "tmp")

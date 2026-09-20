@@ -235,6 +235,8 @@ CAPABILITIES: List[Capability] = [
                False, "low", "sys doctor", "GET /api/sys/doctor", "table", "🩺"),
     Capability("system.config", "system", "设置", "adb 路径、端口、产物目录",
                False, "low", "sys config", "GET /api/sys/config", "form+command-preview", "⚙"),
+    Capability("system.scripts", "system", "脚本存档", "bat / sh 脚本分类存档、备注、点一下就跑",
+               False, "confirm", "script list", "GET /api/scripts", "table", "📜"),
     Capability("system.server", "system", "主控台", "启停与状态",
                False, "low", "web status", "GET /api/health", "detail", "🌐"),
 ]
