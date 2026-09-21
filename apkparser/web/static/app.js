@@ -800,7 +800,8 @@ function buildNav() {
         dataset: { key: gkey },
       },
         el('div', {
-          class: 'nav-grp-hd', title: g.description || g.title,
+          class: 'nav-grp-hd',
+          title: (g.description || g.title) + '\n（点这里只折叠 / 展开）',
           onclick: () => toggleNavNode(gnode, gkey),
         },
           el('span', { class: 'caret' }),
@@ -816,7 +817,9 @@ function buildNav() {
       dataset: { key: dkey },
     },
       el('div', {
-        class: 'nav-dom-hd', title: dom.desc,
+        // 域是**章节标签**，点它只折叠 / 展开 —— 提示里说清楚，别让人以为点进去有页面
+        class: 'nav-dom-hd',
+        title: (dom.desc || dom.title) + '\n（点这里只折叠 / 展开，不是页面）',
         onclick: () => toggleNavNode(dnode, dkey),
       },
         el('span', { class: 'caret' }),

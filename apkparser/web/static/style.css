@@ -76,40 +76,53 @@ a:hover { text-decoration: underline; }
 }
 .nav-tools .btn { flex: 1 1 auto; padding: 4px 0; }
 
-/* 一级：域 */
-.nav-dom { margin-bottom: 2px; }
+/* 一级：域（本机 / 设备 / 系统）
+   —— 它是**章节标签**，不是导航项：点它只会折叠/展开，进不了任何页面。
+   所以刻意不跟按钮抢样子：小字号 + 字距 + 淡色 + 段间分隔线，
+   hover 也不整条高亮（只有文字和箭头变色），免得被当成"点进去有画面"。 */
+.nav-dom { margin-bottom: 0; }
+.nav-dom + .nav-dom > .nav-dom-hd { border-top: 1px solid var(--line-2); margin-top: 5px; }
 
 .nav-dom-hd {
-  display: flex; align-items: center; gap: 7px;
-  padding: 8px 12px; cursor: pointer; user-select: none;
-  font-size: 12px; font-weight: 700; color: var(--ink);
-  letter-spacing: .03em;
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px 5px; cursor: pointer; user-select: none;
+  font-size: 11px; font-weight: 600; color: var(--dim);
+  letter-spacing: .08em;
 }
-.nav-dom-hd:hover { background: var(--panel-2); }
-.nav-dom-hd .d-ico { font-size: 13px; flex: none; }
+.nav-dom-hd:hover { color: var(--ink-2); }
+.nav-dom-hd:hover .caret { color: var(--brand); }
+.nav-dom-hd .d-ico { font-size: 12px; flex: none; opacity: .75; }
 .nav-dom-hd .d-txt { flex: 1 1 auto; }
+/* 章节标签上的计数就是个淡数字，不做 pill —— pill 太像按钮 */
+.nav-dom-hd .n-count { background: none; border: none; padding: 0; font-size: 10.5px; }
 
-/* 二级：功能组 */
+/* 域的内容（组）从这里开始 —— 缩进跟着章节标签的文字走 */
+.nav-dom-bd { padding-left: 0; }
+
+/* 二级：功能组 —— 可折叠容器。hover 只让文字/箭头变色；
+   整条高亮这种"可点"的样子留给真正能进页面的能力项 */
 .nav-grp-hd {
   display: flex; align-items: center; gap: 6px;
-  padding: 6px 10px 6px 18px; cursor: pointer; user-select: none;
-  font-size: 12px; font-weight: 600; color: var(--ink-2);
+  padding: 6px 10px 6px 12px; cursor: pointer; user-select: none;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-2);
 }
-.nav-grp-hd:hover { background: var(--panel-2); color: var(--ink); }
+.nav-grp-hd:hover { color: var(--ink); }
+.nav-grp-hd:hover .caret { color: var(--brand); }
 .nav-grp-hd .g-ico { font-size: 12px; width: 15px; text-align: center; flex: none; }
 .nav-grp-hd .g-txt {
   flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* 三级：能力。用一根竖线把"归属关系"画出来 */
+/* 三级：能力。**只有这些能进页面** —— 所以只有它们有圆角高亮块。
+   再用一根竖线把"归属关系"画出来 */
 .nav-grp-bd {
   border-left: 1px solid var(--line);
-  margin-left: 22px; padding-left: 1px;
+  margin-left: 20px; padding-left: 1px;
 }
 
 .nav-item {
   display: flex; align-items: center; gap: 7px;
-  margin: 1px 7px 1px 3px; padding: 5px 8px; border-radius: 6px;
+  margin: 1px 7px 1px 6px; padding: 5px 8px; border-radius: 6px;
   cursor: pointer; color: var(--ink-2); font-size: 12.5px;
   border: 1px solid transparent;
 }
@@ -117,8 +130,9 @@ a:hover { text-decoration: underline; }
 .nav-item.active {
   background: var(--brand-soft); color: var(--brand-2);
   border-color: #d6e3fb; font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--brand-2);   /* 左侧色条，和脚本库树的选中一致 */
 }
-.nav-item .n-ico { width: 16px; text-align: center; flex: none; font-size: 13px; }
+.nav-item .n-ico { width: 16px; text-align: center; flex: none; font-size: 13px; opacity: .85; }
 .nav-item .n-txt { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item .n-risk { font-size: 10px; color: var(--warn); flex: none; }
 .nav-item .n-dev {
@@ -144,7 +158,10 @@ a:hover { text-decoration: underline; }
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 99px; padding: 0 5px; line-height: 15px;
 }
-.nav-dom-hd:hover .n-count, .nav-grp-hd:hover .n-count { background: #fff; }
+.nav-grp-hd:hover .n-count { background: #fff; }
+/* 域标签的计数本来就没底 —— hover 时别让它凭空冒出一个白块
+   （这条特异性比上面那条高，不写回来就会被盖掉） */
+.nav-dom-hd:hover .n-count { background: none; border: none; color: var(--ink-2); }
 
 /* ---------------------------------------------------------- 组件 */
 
