@@ -384,18 +384,95 @@ function tag(text, kind = '') {
 
 /**
  * 数据表。
- * @param cols  [{key,label,mono,num,width,render}]
+ * @param cols  [{key,label,mono,num,width,render,sortValue,sortable}]
  * @param rows  object[]
- * @param opts  {filter:bool, onRow, emptyText}
+ * @param opts  {filter:bool, onRow, emptyText, filterPlaceholder}
+ *
+ * 排序：点列头轮转 **升 → 降 → 回到原顺序**（三态）。
+ *
+ * 为什么是三态：很多表的"原始顺序"本身就是信息（自检按严重度排、历史按时间倒序），
+ * 只有升降两态的话，点过头就再也回不去了。
+ *
+ * 为什么不做「排序 ▼」下拉：表已经紧挨着一行控件，再塞个下拉，想按包名排得先展开、
+ * 再在一堆字段名里找。列头就在数据上方，指哪儿排哪儿，少一个要维护的控件。
+ *
+ * 排序依据取**行的原始值**（`row[key]` 或 `sortValue(row)`），不读渲染后的文字 ——
+ * 大小列显示 "12.3 MB"，真值是字节数，按显示文字排会得到 1 MB > 900 KB 这种结果。
+ * 带 `_` 前缀的列（`_a` 按钮列之类）与空 label 的列不参与排序。
  */
 function dataTable(cols, rows, opts = {}) {
   const wrap = el('div', { class: 'tbl-wrap' });
   const table = el('table', { class: 'tbl' });
-  const thead = el('thead', {}, el('tr', {},
-    cols.map((c) => el('th', { class: (c.mono ? 'mono ' : '') + (c.num ? 'num' : ''), style: c.width ? { width: c.width } : null }, c.label))));
   const tbody = el('tbody');
 
-  function paint(list) {
+  let base = rows;                       // 过滤后的基准列表（排序只改呈现，不改它）
+  let ord = null;                        // {ci, dir}  dir: 1 升 / -1 降；null = 原顺序
+
+  const canSort = (c) => c.sortable !== false && !!c.key && c.key.charAt(0) !== '_' && !!c.label;
+
+  const marks = [];
+  const ths = cols.map((c, ci) => {
+    const ok = canSort(c);
+    // 用数组拼类名：手写字符串拼接很容易漏掉空格（`'num sortable' + 'asc'`
+    // 会拼成 `sortableasc`，看着像加上了，其实一个类都没生效）
+    const baseCls = [c.mono ? 'mono' : '', c.num ? 'num' : '', ok ? 'sortable' : '']
+      .filter(Boolean).join(' ');
+    const arrow = ok ? el('span', { class: 'th-ord' }, '↕') : null;
+    const th = el('th', {
+      class: baseCls,
+      style: c.width ? { width: c.width } : null,
+      title: ok ? '点一下按「' + c.label + '」排序：升 → 降 → 恢复原顺序' : null,
+    }, c.label, arrow);
+    if (ok) {
+      th.addEventListener('click', () => {
+        ord = (!ord || ord.ci !== ci) ? { ci, dir: 1 } : (ord.dir === 1 ? { ci, dir: -1 } : null);
+        paint();
+      });
+      marks.push({ th, arrow, baseCls, ci });
+    }
+    return th;
+  });
+  const thead = el('thead', {}, el('tr', {}, ths));
+
+  function markHeads() {
+    for (const m of marks) {
+      const on = !!ord && ord.ci === m.ci;
+      m.th.className = (m.baseCls + (on ? (ord.dir === 1 ? ' asc' : ' desc') : '')).trim();
+      m.th.setAttribute('aria-sort', on ? (ord.dir === 1 ? 'ascending' : 'descending') : 'none');
+      m.arrow.textContent = on ? (ord.dir === 1 ? '↑' : '↓') : '↕';
+    }
+  }
+
+  const COLL = new Intl.Collator(['zh-Hans-CN', 'zh', 'en'], { numeric: true, sensitivity: 'base' });
+
+  /** 值比较。数字按数比、布尔按真假比，其余交给 collator
+   *  （`numeric: true` 让 "1.0.10" > "1.0.2"、"app2" < "app10"，
+   *   顺带把 "09-21 10:03" 这种时间串也排对）。 */
+  function cmpAny(a, b) {
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    if (typeof a === 'boolean' && typeof b === 'boolean') return (a ? 1 : 0) - (b ? 1 : 0);
+    const na = Number(a), nb = Number(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return COLL.compare(String(a), String(b));
+  }
+
+  function sorted() {
+    if (!ord) return base;
+    const c = cols[ord.ci];
+    const val = (r) => (c.sortValue ? c.sortValue(r) : r[c.key]);
+    const dir = ord.dir;
+    return base.slice().sort((x, y) => {
+      const a = val(x), b = val(y);
+      const ea = a == null || a === '', eb = b == null || b === '';
+      // 空值恒沉底：不然一按降序，整列「-」全翻到最上面挡着
+      if (ea || eb) return ea === eb ? 0 : (ea ? 1 : -1);
+      return dir * cmpAny(a, b);
+    });
+  }
+
+  function paint() {
+    markHeads();
+    const list = sorted();
     tbody.innerHTML = '';
     if (!list.length) {
       tbody.appendChild(el('tr', {}, el('td', { colspan: cols.length },
@@ -416,7 +493,7 @@ function dataTable(cols, rows, opts = {}) {
       tbody.appendChild(tr);
     }
   }
-  paint(rows);
+  paint();
   table.appendChild(thead);
   table.appendChild(tbody);
   wrap.appendChild(table);
@@ -427,9 +504,11 @@ function dataTable(cols, rows, opts = {}) {
       type: 'search', placeholder: opts.filterPlaceholder || '过滤…',
       oninput: (e) => {
         const kw = e.target.value.trim().toLowerCase();
-        paint(!kw ? rows : rows.filter((r) =>
+        // 过滤换基准、排序换呈现：两者互不干扰（过滤后再按当前列排）
+        base = !kw ? rows : rows.filter((r) =>
           cols.some((c) => String(c.render ? '' : (r[c.key] ?? '')).toLowerCase().includes(kw))
-          || JSON.stringify(r).toLowerCase().includes(kw)));
+          || JSON.stringify(r).toLowerCase().includes(kw));
+        paint();
       },
     });
     box.appendChild(inp);

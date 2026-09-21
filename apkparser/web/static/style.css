@@ -519,6 +519,25 @@ table.tbl tbody tr.clickable { cursor: pointer; }
 table.tbl td.mono, table.tbl th.mono { font-family: var(--mono); font-size: 11.5px; }
 table.tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* 表头排序：点列头轮转 升 → 降 → 原顺序。
+
+   指示器默认**隐形**（每列都挂一个 ↕，表头立刻变吵，而它平时并不是重点），
+   鼠标扫过才浮出来；一旦真在按某列排，那列头转成琥珀 —— 全站"当前通道"
+   都用这个色（见文件头 ②），一眼能看出这张表现在是按什么在排。 */
+table.tbl th.sortable { cursor: pointer; user-select: none; }
+table.tbl th.sortable:hover { color: var(--ink-2); }
+table.tbl th .th-ord {
+  display: inline-block; margin-left: 5px; width: 8px;
+  font-size: 9.5px; line-height: 1; text-align: center;
+  color: var(--dim); opacity: 0; transition: opacity .12s;
+}
+table.tbl th.sortable:hover .th-ord { opacity: .5; }
+table.tbl th.asc, table.tbl th.desc {
+  color: var(--signal-ink); background: var(--brand-soft);
+  border-bottom-color: var(--signal);
+}
+table.tbl th.asc .th-ord, table.tbl th.desc .th-ord { opacity: 1; color: var(--signal); }
+
 /* 徽标 */
 .tag {
   display: inline-block; padding: 0 6px; border-radius: 3px;
