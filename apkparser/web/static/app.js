@@ -4269,10 +4269,14 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
     const hasKids = kids.length > 0;
     const open = hasKids && (opened.has(node.rel || '') || onAncestor(node));
 
+    // 跳转绑在**整行**上：只绑名字按钮的话，行右侧一大片空白点了没反应
+    const jump = () => { if (!on) go('system.scripts', { folder: node.rel || '' }); };
+
     // data-has 让 CSS 能把「下面还有子目录的父节点」和「叶子」画成两种分量
     const row = el('div', {
       class: 'scr-tree-i' + (on ? ' on' : ''),
       dataset: { depth: String(Math.min(depth, 6)), has: hasKids ? '1' : '0' },
+      onclick: jump,
       title: (node.rel || '脚本库根目录')
         + '（' + (node.counts ? node.counts.scripts : 0) + ' 个脚本'
         + (hasKids ? '，' + kids.length + ' 个子目录' : '') + '）',
@@ -4292,7 +4296,7 @@ VIEWS['system.scripts'] = async function (host, cap, q) {
 
     row.appendChild(el('button', {
       class: 'scr-tree-n',
-      onclick: () => { if (!on) go('system.scripts', { folder: node.rel || '' }); },
+      onclick: (e) => { e.stopPropagation(); jump(); },   // 行上已有 jump，这里必须挡住冒泡
     }, (node.name || '脚本库')));
 
     // 父节点挂子目录数（画成 pill），叶子挂脚本数（淡数字）
