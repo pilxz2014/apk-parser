@@ -313,33 +313,90 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
 
 /* Activity 堆栈（device.stack）
 
- 字段用「中文标签 + 值」的网格排 —— 一行的信息量比竖排的 kv 表大，
- 而标签固定宽度能让值左对齐成一列，扫起来快。
+ 改成单页可折叠树：Display → Task → Activity 用缩进和 caret 展示，
+ 顶部 Hero 卡片突出当前界面；Activity 默认显示中等密度字段，
+ 其余字段点击展开查看。减少信息墙，层级一眼可见。
  */
 
-.stack-fields {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-  gap: 6px 20px;
-}
-.stack-field { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
-.stack-fk { color: var(--dim); font-size: 12px; text-align: right; cursor: help; }
-.stack-fv { font-size: 12.5px; word-break: break-all; }
-.stack-fv.mono { font-family: var(--mono); font-size: 12px; }
+.stk-wrap { display: flex; flex-direction: column; gap: 10px; }
 
-.stack-task-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.stack-id, .stack-idx { color: var(--ink-2); font-weight: 600; font-family: var(--mono); }
-.stack-aff { color: var(--ink); font-weight: 650; }
-.stack-dim { color: var(--dim); font-size: 12px; }
-.stack-sp { flex: 1 1 auto; }
-
-.stack-act {
-  border: 1px solid var(--line-2); border-radius: 6px;
-  padding: 9px 11px; margin: 8px 0; background: var(--panel-2);
+/* Hero 卡片：当前界面 */
+.stk-hero { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+.stk-hero-main { min-width: 0; }
+.stk-hero-comp { font-family: var(--mono); font-size: 15px; word-break: break-all; line-height: 1.45; }
+.stk-hero-meta { color: var(--dim); font-size: 12px; margin-top: 4px; }
+.stk-hero-state { margin: 8px 0 6px; }
+.stk-hero-counts { color: var(--dim); font-size: 12px; margin-top: 6px; }
+.stk-hero-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 720px) {
+  .stk-hero { grid-template-columns: 1fr; }
+  .stk-hero-acts { justify-content: flex-start; }
 }
-/* 正在前台跑的那个：一眼看到绿色块就知道"是它" */
-.stack-act.on { border-color: #b9dccb; background: var(--ok-soft); }
-.stack-act-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 7px; }
-.stack-comp { font-size: 12.5px; word-break: break-all; }
+
+/* 折叠树 */
+.stk-tree { display: flex; flex-direction: column; gap: 3px; }
+.stk-kids {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-left: 18px; padding-left: 10px;
+  border-left: 1px dashed var(--line);
+}
+
+.stk-caret {
+  flex: none; width: 14px; text-align: center;
+  color: var(--dim); font-size: 10px; cursor: pointer;
+  user-select: none;
+}
+.stk-caret.open { transform: rotate(90deg); color: var(--signal); }
+.stk-caret.leaf { color: var(--line-2); cursor: default; transform: none; }
+
+.stk-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 10px; border-radius: 5px;
+  min-width: 0;
+}
+.stk-row:hover { background: var(--panel-2); }
+
+.stk-display-hd { font-weight: 700; color: var(--ink); font-size: 13px; }
+.stk-task-hd { font-weight: 600; color: var(--ink-2); font-size: 12.5px; }
+.stk-task-hd .mono { font-family: var(--mono); }
+.stk-act-hd { font-family: var(--mono); font-size: 12.5px; word-break: break-all; line-height: 1.4; }
+.stk-act-hd .mono { font-family: var(--mono); }
+
+.stk-row.on { background: var(--ok-soft); border: 1px solid #b9dccb; }
+.stk-row.focused { box-shadow: inset 3px 0 0 var(--brand); }
+.stk-row.plain { cursor: default; }
+.stk-row.interactive { cursor: pointer; }
+
+.stk-id { font-family: var(--mono); font-weight: 600; color: var(--ink-2); flex: none; }
+.stk-aff { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.stk-dim { color: var(--dim); font-size: 11.5px; }
+.stk-sp { flex: 1 1 auto; }
+
+.stk-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; color: var(--ink-2);
+}
+.stk-meta-line { color: var(--line); }
+
+.stk-acts { display: flex; gap: 5px; opacity: 0; transition: opacity .12s; }
+.stk-row:hover .stk-acts { opacity: 1; }
+@media (max-width: 900px) { .stk-acts { opacity: 1; } }
+
+/* Activity 详情展开区 */
+.stk-detail {
+  margin: 2px 0 8px 28px;
+  padding: 10px 12px;
+  background: var(--panel-2); border-radius: 6px;
+}
+.stk-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px 18px;
+}
+.stk-field { display: grid; grid-template-columns: 86px 1fr; gap: 8px; align-items: baseline; }
+.stk-fk { color: var(--dim); font-size: 11.5px; text-align: right; cursor: help; }
+.stk-fv { font-size: 12px; word-break: break-all; }
+.stk-fv.mono { font-family: var(--mono); font-size: 11.5px; }
 
 /* ---------------------------------------------------------- 脚本存档库
 

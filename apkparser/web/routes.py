@@ -399,14 +399,25 @@ def h_app_action(ctx):
     op = str(ctx.field("op", "") or ctx.field("action", ""))
     if op not in ("stop", "clear", "uninstall", "enable", "disable", "restart"):
         return 400, {"ok": False, "error": "不支持的操作：%s" % op}
-    if op in ("clear", "uninstall"):
-        # 危险操作：要求前端回传包名做二次确认（工具界面不能只靠一个按钮）
+    if op == "clear":
+        # 清数据不可恢复：要求前端把包名原样传回来做二次确认
+        # （工具界面不能只靠一个按钮）
         confirm = str(ctx.field("confirm", ""))
         if confirm != ctx.pkg:
             return 400, {
                 "ok": False,
-                "error": "危险操作需要二次确认：请把包名原样传入 confirm 字段",
+                "error": "清除数据需要二次确认：请把包名原样传入 confirm 字段",
                 "needConfirm": ctx.pkg,
+                "risk": "dangerous",
+            }
+    elif op == "uninstall":
+        # 卸载：前端弹一句确认就够，不要求敲包名；但仍要求调用方显式带上
+        # confirm 标记 —— 免得有脚本或别的界面误调这条接口。
+        if not str(ctx.field("confirm", "")):
+            return 400, {
+                "ok": False,
+                "error": "卸载需要确认：请带上 confirm 字段（页面上的确认框会自动带）",
+                "needConfirm": "yes",
                 "risk": "dangerous",
             }
     res = dev_tools.uninstall(ctx.pkg, ctx.field("device", "")) if op == "uninstall" else \

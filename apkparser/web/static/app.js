@@ -2243,19 +2243,21 @@ function fHint(fields, key) {
   return (f && f.hint) || '';
 }
 
-/** 一格「中文标签 + 值」。标签带 title —— 悬停就看这字段到底是啥。 */
-function fCell(fields, key, value, mono) {
+/** 一格「中文标签 + 值」。标签带 title —— 悬停就看这字段到底是啥。
+    `prefix` 决定 CSS 类前缀，默认 stack，新 Activity 堆栈视图用 stk。 */
+function fCell(fields, key, value, mono, prefix) {
+  prefix = prefix || 'stack';
   if (value === '' || value == null || value === false) return null;
-  return el('div', { class: 'stack-field' },
-    el('div', { class: 'stack-fk', title: fHint(fields, key) }, fLabel(fields, key)),
-    el('div', { class: 'stack-fv' + (mono ? ' mono' : '') }, String(value)));
+  return el('div', { class: prefix + '-field' },
+    el('div', { class: prefix + '-fk', title: fHint(fields, key) }, fLabel(fields, key)),
+    el('div', { class: prefix + '-fv' + (mono ? ' mono' : '') }, String(value)));
 }
 
 function yn(b) { return b ? '是' : '否'; }
 
 function stateTag(a) {
   const s = (a.state || '').toUpperCase();
-  const kind = s === 'RESUMED' ? 'ok' : (s === 'PAUSED' ? 'warn' : 'plain');
+  const kind = s === 'RESUMED' ? 'ok' : (s === 'PAUSED' || s === 'STARTED' ? 'warn' : 'plain');
   return tag(a.stateText || a.state || '-', kind);
 }
 
@@ -2264,9 +2266,10 @@ VIEWS['device.stack'] = async function (host, cap, q) {
   const visOnly = el('input', { type: 'checkbox' });
   const out = el('div');
   let data = null;
+  const opened = new Set();          // d-${id} / t-${id} / a-${taskId}-${index}
 
   host.appendChild(card('当前设备堆栈',
-    '把 dumpsys activity activities 拆成「屏幕 → 任务 → Activity」三层；每个字段的中文名悬停可看说明',
+    '把 dumpsys activity activities 拆成「屏幕 → 任务 → Activity」三层；点击 Activity 展开完整字段',
     el('div', { class: 'row' },
       el('div', { class: 'grow' }, kw),
       el('label', { class: 'check' }, visOnly, '只看可见任务'),
@@ -2298,6 +2301,27 @@ VIEWS['device.stack'] = async function (host, cap, q) {
     return String(text || '').toLowerCase().indexOf(k) >= 0;
   }
 
+  function defaultOpened(r) {
+    const set = new Set();
+    for (const d of (r.displays || [])) {
+      set.add('d-' + d.id);
+      for (const t of (d.tasks || [])) set.add('t-' + t.id);
+    }
+    return set;
+  }
+
+  function collectKeys(r) {
+    const keys = new Set();
+    for (const d of (r.displays || [])) {
+      keys.add('d-' + d.id);
+      for (const t of (d.tasks || [])) {
+        keys.add('t-' + t.id);
+        for (const a of (t.activities || [])) keys.add('a-' + t.id + '-' + a.index);
+      }
+    }
+    return keys;
+  }
+
   function paint() {
     const r = data;
     out.innerHTML = '';
@@ -2307,10 +2331,52 @@ VIEWS['device.stack'] = async function (host, cap, q) {
     }
     const F = r.fields || {};
     const top = r.top || {};
+    const resumed = r.resumed || {};
     const cts = r.counts || {};
+    const validKeys = collectKeys(r);
 
-    // ---- 当前界面 ----
-    const acts = el('div', { class: 'row' });
+    // 首次加载默认全部展开；之后保留用户手动状态，但只保留仍然存在的 key
+    if (opened.size === 0) {
+      for (const k of defaultOpened(r)) opened.add(k);
+    } else {
+      for (const k of Array.from(opened)) if (!validKeys.has(k)) opened.delete(k);
+    }
+
+    const wrap = el('div', { class: 'stk-wrap' });
+    wrap.appendChild(renderHero(F, top, resumed, cts));
+
+    const tree = el('div', { class: 'stk-tree' });
+    let shown = 0;
+    for (const d of (r.displays || [])) {
+      const dn = displayNode(F, d, opened, visOnly.checked, kw.value.trim());
+      if (dn) { tree.appendChild(dn); shown += 1; }
+    }
+    if (shown === 0) {
+      tree.appendChild(notice('warn', '没有匹配的任务。换个关键词，或取消「只看可见任务」。'));
+    }
+    wrap.appendChild(tree);
+
+    wrap.appendChild(card('这条命令',
+      `原始输出 ${r.rawLines || 0} 行 / ${r.rawBytes || 0} 字节 —— 界面里只列结构化结果，命令原样留在这儿可复制`,
+      codeBlock(r.command || '')));
+    out.appendChild(wrap);
+  }
+
+  function renderHero(F, top, resumed, cts) {
+    const main = el('div', { class: 'stk-hero-main' },
+      el('div', { class: 'stk-hero-comp' }, top.component || '-'));
+    if (top.package || top.className) {
+      main.appendChild(el('div', { class: 'stk-hero-meta' },
+        [top.package, top.className].filter(Boolean).join(' / ')));
+    }
+    if (resumed.component && resumed.component === top.component) {
+      main.appendChild(el('div', { class: 'stk-hero-state' }, tag('前台运行中', 'ok')));
+    }
+    main.appendChild(el('div', { class: 'stk-hero-counts' },
+      `任务 ${cts.tasks || 0} 个（可见 ${cts.visibleTasks || 0}）/ `
+      + `Activity ${cts.activities || 0} 个 / 涉及 ${cts.packages || 0} 个包`));
+
+    const acts = el('div', { class: 'stk-hero-acts' });
     if (top.component) {
       acts.appendChild(el('button', { class: 'btn', onclick: () => copyText(top.component) }, '复制组件'));
     }
@@ -2324,104 +2390,166 @@ VIEWS['device.stack'] = async function (host, cap, q) {
         onclick: () => go('device.launch.start', { pkg: top.package, component: top.component }),
       }, '用启动器打开'));
     }
-    out.appendChild(card('当前界面',
-      `任务 ${cts.tasks || 0} 个（可见 ${cts.visibleTasks || 0}）/ `
-      + `Activity ${cts.activities || 0} 个 / 涉及 ${cts.packages || 0} 个包`,
-      el('div', { class: 'stack-fields' },
-        fCell(F, 'package', top.package, true),
-        fCell(F, 'className', top.className, true),
-        fCell(F, 'fullClass', top.fullClass, true),
-        fCell(F, 'component', top.component, true),
-        fCell(F, 'taskId', top.taskId, false)),
-      acts));
 
-    // ---- 任务 / Activity ----
-    let shown = 0;
-    for (const d of (r.displays || [])) {
-      for (const t of (d.tasks || [])) {
-        if (visOnly.checked && !t.visible) continue;
-        const all = t.activities || [];
-        // 任务名命中 → 把它下面的 Activity 全列出来；否则只列命中的那些
-        const byTask = hits(t.affinityPackage) && kw.value.trim() !== '';
-        const list = kw.value.trim() === '' ? all : (byTask ? all : all.filter(
-          (a) => hits(a.component) || hits(a.package) || hits(a.className) || hits(a.fullClass)));
-        if (kw.value.trim() !== '' && list.length === 0) continue;
-        shown += 1;
-        out.appendChild(taskCard(F, t, list, d.id));
+    return card('当前界面', null,
+      el('div', { class: 'stk-hero' }, main, acts));
+  }
+
+  function caret(isOpen, hasKids, onToggle) {
+    if (!hasKids) return el('span', { class: 'stk-caret leaf' }, '·');
+    return el('span', {
+      class: 'stk-caret' + (isOpen ? ' open' : ''),
+      onclick: (e) => { e.stopPropagation(); onToggle(); },
+    }, '▸');
+  }
+
+  function displayNode(F, d, opened, visibleOnly, kwd) {
+    const key = 'd-' + d.id;
+    const tasks = (d.tasks || []).map((t) => taskNode(F, t, d.id, opened, visibleOnly, kwd))
+      .filter(Boolean);
+    if (visibleOnly && tasks.length === 0 && (d.tasks || []).every((t) => !t.visible)) return null;
+    if (kwd && tasks.length === 0) {
+      // 关键词没命中任何 task，但可能命中 display id；若没命中则隐藏
+      if (!hits('Display #' + d.id)) return null;
+    }
+    const isOpen = opened.has(key);
+    const totalActs = (d.tasks || []).reduce((s, t) => s + (t.activities || []).length, 0);
+
+    const row = el('div', { class: 'stk-row stk-display-hd plain' },
+      caret(isOpen, tasks.length > 0, () => {
+        opened.has(key) ? opened.delete(key) : opened.add(key);
+        paint();
+      }),
+      el('span', {}, 'Display #' + d.id),
+      el('span', { class: 'stk-dim' }, `任务 ${d.tasks ? d.tasks.length : 0} / Activity ${totalActs}`));
+
+    const kids = el('div', { class: 'stk-kids' });
+    if (isOpen) for (const t of tasks) kids.appendChild(t);
+    return el('div', { class: 'stk-node' }, row, kids);
+  }
+
+  function taskMatches(t, kwd) {
+    if (!kwd) return true;
+    return hits(t.affinityPackage) || hits('Task #' + t.id) || hits(t.type) || hits(t.modeText);
+  }
+
+  function filterActs(acts, kwd, taskMatch) {
+    if (!kwd || taskMatch) return acts.slice();
+    return acts.filter((a) =>
+      hits(a.component) || hits(a.package) || hits(a.className) || hits(a.fullClass));
+  }
+
+  function taskNode(F, t, displayId, opened, visibleOnly, kwd) {
+    if (visibleOnly && !t.visible) return null;
+    const taskMatch = taskMatches(t, kwd);
+    const acts = filterActs(t.activities || [], kwd, taskMatch);
+    if (kwd && acts.length === 0 && !taskMatch) return null;
+
+    const key = 't-' + t.id;
+    const isOpen = opened.has(key);
+    const actCount = (t.activities || []).length;
+
+    const row = el('div', { class: 'stk-row stk-task-hd plain' },
+      caret(isOpen, actCount > 0, () => {
+        opened.has(key) ? opened.delete(key) : opened.add(key);
+        paint();
+      }),
+      el('span', { class: 'stk-id mono' }, '#' + t.id),
+      el('span', { class: 'stk-aff mono' }, t.affinityPackage || '(无归属)'),
+      t.visible ? tag('可见', 'ok') : tag('不可见', 'plain'),
+      tag(t.modeText || t.mode || '-', 'plain'),
+      el('span', { class: 'stk-dim' }, 'Activity ' + actCount),
+      t.type ? tag(t.type, 'plain') : null);
+
+    const kids = el('div', { class: 'stk-kids' });
+    if (isOpen) {
+      for (const a of acts) {
+        const an = actNode(F, a, displayId, opened);
+        if (an) kids.appendChild(an);
       }
     }
-    if (shown === 0) {
-      out.appendChild(notice('warn', '没有匹配的任务。换个关键词，或取消「只看可见任务」。'));
-    }
-
-    out.appendChild(card('这条命令',
-      `原始输出 ${r.rawLines || 0} 行 / ${r.rawBytes || 0} 字节 —— 界面里只列结构化结果，命令原样留在这儿可复制`,
-      codeBlock(r.command || '')));
+    return el('div', { class: 'stk-node' }, row, kids);
   }
 
-  function taskCard(F, t, list, displayId) {
-    const head = el('div', { class: 'stack-task-hd' },
-      el('span', { class: 'stack-id mono' }, '#' + t.id),
-      el('span', { class: 'stack-aff mono' }, t.affinityPackage || '(无归属)'),
-      t.visible ? tag('可见', 'ok') : tag('不可见', 'plain'),
-      tag(t.modeText || t.mode || '-', 'plain'));
-    if (t.type) head.appendChild(tag(t.type, 'plain'));
+  function actNode(F, a, displayId, opened) {
+    const key = 'a-' + a.taskId + '-' + a.index;
+    const isOpen = opened.has(key);
+    const cls = 'stk-row stk-act-hd interactive'
+      + (a.isResumed ? ' on' : '')
+      + (a.isFocused ? ' focused' : '');
 
-    const body = el('div', { class: 'stack-fields' },
-      fCell(F, 'taskId', t.id),
-      fCell(F, 'affinity', t.affinityPackage, true),
-      fCell(F, 'mode', t.modeText || t.mode, false),
-      fCell(F, 'visible', yn(t.visible)),
-      fCell(F, 'size', t.size != null ? t.size : ''),
-      fCell(F, 'bounds', t.bounds, true));
-
-    for (const a of list) {
-      body.appendChild(actBlock(F, a, displayId));
+    const meta = el('div', { class: 'stk-meta' });
+    if (a.package) meta.appendChild(el('span', {}, a.package));
+    if (a.className) {
+      if (a.package) meta.appendChild(el('span', { class: 'stk-meta-line' }, '|'));
+      meta.appendChild(el('span', {}, a.className));
     }
-    return card(head, null, body);
-  }
+    if (a.processName || a.pid) {
+      const proc = [a.processName, a.pid ? 'PID ' + a.pid : ''].filter(Boolean).join(' ');
+      if (meta.childNodes.length) meta.appendChild(el('span', { class: 'stk-meta-line' }, '|'));
+      meta.appendChild(el('span', {}, proc));
+    }
 
-  function actBlock(F, a, displayId) {
-    const hd = el('div', { class: 'stack-act-hd' },
-      el('span', { class: 'stack-idx mono' }, '#' + a.index),
-      el('span', { class: 'stack-comp mono' }, a.component || '-'),
-      stateTag(a));
-    if (a.isFocused) hd.appendChild(tag('当前焦点', 'brand'));
-    if (a.isTop) hd.appendChild(tag('栈顶', 'plain'));
-    if (a.appLabel) hd.appendChild(el('span', { class: 'stack-dim' }, a.appLabel));
-    hd.appendChild(el('span', { class: 'stack-sp' }));
+    const acts = el('div', { class: 'stk-acts' });
     if (a.component) {
-      hd.appendChild(el('button', { class: 'btn', onclick: () => copyText(a.component) }, '复制'));
+      acts.appendChild(el('button', {
+        class: 'btn sm',
+        onclick: (e) => { e.stopPropagation(); copyText(a.component); },
+      }, '复制'));
     }
     if (a.package) {
-      hd.appendChild(el('button', {
-        class: 'btn',
-        onclick: () => go('device.app.detail', { pkg: a.package }),
+      acts.appendChild(el('button', {
+        class: 'btn sm',
+        onclick: (e) => { e.stopPropagation(); go('device.app.detail', { pkg: a.package }); },
       }, '应用详情'));
-      hd.appendChild(el('button', {
-        class: 'btn',
-        onclick: () => go('device.launch.start', { pkg: a.package, component: a.component }),
+      acts.appendChild(el('button', {
+        class: 'btn sm',
+        onclick: (e) => { e.stopPropagation(); go('device.launch.start', { pkg: a.package, component: a.component }); },
       }, '启动'));
     }
 
-    return el('div', { class: 'stack-act' + (a.isResumed ? ' on' : '') }, hd,
-      el('div', { class: 'stack-fields' },
-        fCell(F, 'package', a.package, true),
-        fCell(F, 'appLabel', a.appLabel),
-        fCell(F, 'className', a.className, true),
-        fCell(F, 'fullClass', a.fullClass, true),
-        fCell(F, 'component', a.component, true),
-        fCell(F, 'state', a.stateText || a.state),
-        fCell(F, 'visible', a.visible != null ? yn(a.visible) : ''),
-        fCell(F, 'processName', a.processName, true),
-        fCell(F, 'pid', a.pid),
-        fCell(F, 'userId', a.userId),
-        fCell(F, 'taskId', a.taskId),
-        fCell(F, 'displayId', a.displayId || displayId),
-        fCell(F, 'launchedFromPackage', a.launchedFromPackage, true),
-        fCell(F, 'launchCount', a.launchCount),
-        fCell(F, 'lastLaunchTime', a.lastLaunchTime, true),
-        fCell(F, 'intent', a.intent, true)));
+    const row = el('div', { class: cls, onclick: () => {
+      opened.has(key) ? opened.delete(key) : opened.add(key);
+      paint();
+    } },
+      el('span', { class: 'stk-id mono' }, '#' + a.index),
+      el('span', { class: 'mono' }, a.component || '-'),
+      stateTag(a),
+      a.isFocused ? tag('当前焦点', 'brand') : null,
+      a.isTop ? tag('栈顶', 'plain') : null,
+      a.appLabel ? el('span', { class: 'stk-dim' }, a.appLabel) : null,
+      el('span', { class: 'stk-sp' }),
+      acts);
+
+    const body = el('div');
+    if (meta.childNodes.length) body.appendChild(meta);
+
+    const detail = el('div');
+    if (isOpen) detail.appendChild(actDetail(F, a, displayId));
+
+    return el('div', { class: 'stk-node' }, row, body, detail);
+  }
+
+  function actDetail(F, a, displayId) {
+    return el('div', { class: 'stk-detail' },
+      el('div', { class: 'stk-fields' },
+        fCell(F, 'fullClass', a.fullClass, true, 'stk'),
+        fCell(F, 'package', a.package, true, 'stk'),
+        fCell(F, 'className', a.className, true, 'stk'),
+        fCell(F, 'component', a.component, true, 'stk'),
+        fCell(F, 'visible', a.visible != null ? yn(a.visible) : '', false, 'stk'),
+        fCell(F, 'processName', a.processName, true, 'stk'),
+        fCell(F, 'pid', a.pid, false, 'stk'),
+        fCell(F, 'userId', a.userId, false, 'stk'),
+        fCell(F, 'taskId', a.taskId, false, 'stk'),
+        fCell(F, 'displayId', a.displayId || displayId, false, 'stk'),
+        fCell(F, 'launchedFromPackage', a.launchedFromPackage, true, 'stk'),
+        fCell(F, 'launchedFromUid', a.launchedFromUid, false, 'stk'),
+        fCell(F, 'launchCount', a.launchCount, false, 'stk'),
+        fCell(F, 'lastLaunchTime', a.lastLaunchTime, true, 'stk'),
+        fCell(F, 'lastVisibleTime', a.lastVisibleTime, true, 'stk'),
+        fCell(F, 'intent', a.intent, true, 'stk'),
+        fCell(F, 'appLabel', a.appLabel, false, 'stk')));
   }
 
   load(false);
@@ -2840,19 +2968,26 @@ const appActionsView = async function (host, cap, q) {
     const p = pkgOf();
     if (!p) { toast('请填包名', 'bad'); return; }
     if (danger) {
-      const ok = await confirmTyping({
-        title: op === 'clear' ? '确认清除数据' : '确认卸载',
-        message: op === 'clear'
-          ? `缓存清掉；**应用数据会全部丢失且不可恢复**。`
-          : `应用会被卸载，数据一并删除。`,
-        expect: p, action: op === 'clear' ? '清除数据' : '卸载',
-      });
+      // 清除数据会丢东西且不可恢复 —— 要求把包名敲一遍；
+      // 卸载是常见操作，弹一句"确定吗"就够，不必再手打包名。
+      const ok = op === 'clear'
+        ? await confirmTyping({
+            title: '确认清除数据',
+            message: `缓存清掉；**应用数据会全部丢失且不可恢复**。`,
+            expect: p, action: '清除数据',
+          })
+        : await confirmBox({
+            title: '确认卸载',
+            message: `应用会被卸载，数据一并删除。`,
+            action: '卸载',
+          });
       if (!ok) return;
     }
     out.innerHTML = ''; out.appendChild(spinner('执行中…'));
     try {
       const r = await api(`/api/apps/${encodeURIComponent(p)}/action`, {
-        method: 'POST', body: { op, device: devParam(), confirm: danger ? p : '' },
+        method: 'POST',
+        body: { op, device: devParam(), confirm: danger ? (op === 'clear' ? p : 'yes') : '' },
       });
       out.innerHTML = '';
       out.appendChild(r.ok ? notice('ok', r.detail || '完成') : notice('bad', r.detail || '失败'));
@@ -2861,7 +2996,7 @@ const appActionsView = async function (host, cap, q) {
   }
 
   if (note) host.appendChild(note);
-  host.appendChild(card('应用操作', '危险动作要输入包名二次确认（后端也会校验一次）',
+  host.appendChild(card('应用操作', '清除数据要输入包名二次确认；卸载弹框确认即可（后端也会校验一次）',
     note ? null : el('div', { class: 'row' }, el('div', { class: 'grow' }, pkg)),
     el('div', { class: 'row', style: { marginTop: '6px' } },
       ...APP_ACTIONS.map((a) => el('button', {

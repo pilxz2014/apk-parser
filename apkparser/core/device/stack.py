@@ -18,7 +18,7 @@
 
 import re
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import adb as adb_mod
 
@@ -54,6 +54,7 @@ STATE_TEXT = {
     "RESUMED": "前台运行中",
     "PAUSED": "已暂停",
     "STOPPED": "已停止",
+    "STARTED": "已启动",
     "DESTROYED": "已销毁",
     "DESTROYING": "销毁中",
     "INITIALIZING": "启动中",
@@ -310,8 +311,8 @@ def parse(text: str) -> dict:
             if pm:
                 cur_act["pid"] = pm.group(1)
 
-    # ---- 收尾：给每个 task 标出栈顶，给全局认出"当前在前台的那个" ----
-    top = {"component": "", "package": "", "className": "", "taskId": 0}
+    # ---- 收尾：给每个 task 标出栈顶，收集包名，标记焦点 ----
+    first_top: Optional[dict] = None
     packages: List[str] = []
     n_act = 0
     n_visible_task = 0
@@ -329,13 +330,35 @@ def parse(text: str) -> dict:
                     packages.append(pk)
                 if focused.get("component") and a["component"] == focused["component"]:
                     a["isFocused"] = True
-            if not top["component"]:
-                a = t["activities"][-1]
-                top = {"component": a["component"], "package": a["package"],
-                       "className": a["className"], "taskId": t["id"],
-                       "fullClass": a.get("fullClass", "")}
+                if first_top is None:
+                    first_top = {
+                        "component": a["component"], "package": a["package"],
+                        "className": a["className"], "taskId": t["id"],
+                        "fullClass": a.get("fullClass", ""),
+                    }
 
-    if not resumed.get("component"):         # 没扫到 topResumed 就用栈顶
+    # ---- 确定"当前界面"： resumed > focused > 第一个非空 task 的栈顶 ----
+    def _find_act(match_comp: str) -> Optional[Tuple[dict, dict]]:
+        for d in displays:
+            for t in d["tasks"]:
+                for a in t["activities"]:
+                    if a["component"] == match_comp:
+                        return t, a
+        return None
+
+    top = {"component": "", "package": "", "className": "", "taskId": 0}
+    target_comp = resumed.get("component") or focused.get("component") or ""
+    if target_comp:
+        matched = _find_act(target_comp)
+        if matched:
+            t, a = matched
+            top = {"component": a["component"], "package": a["package"],
+                   "className": a["className"], "taskId": t["id"],
+                   "fullClass": a.get("fullClass", "")}
+    if not top["component"] and first_top:
+        top = dict(first_top)
+
+    if not resumed.get("component"):         # 没扫到 topResumed 就用当前界面
         resumed = dict(top, raw="", hash="") if top.get("component") else resumed
     if not focused.get("component") and resumed.get("component"):
         focused = dict(resumed)

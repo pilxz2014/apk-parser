@@ -82,6 +82,27 @@ def make_icon() -> str:
     return str(out)
 
 
+def stop_running() -> None:
+    """打包前先停掉正在跑的 APKConsole.exe。
+
+    不这么做的话 COLLECT 会**先清空 dist/APKConsole/ 再重建**：它删得掉
+    _internal 下的资源，却覆盖不了正在运行的 exe，构建中途失败。结果是
+    exe 还在跑、静态文件却已经没了 —— 页面上只剩一句 "static not found"，
+    跟"打包其实失败了"这个真正的原因离得很远，很难查。
+    """
+    try:
+        r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s.exe" % APP, "/NH"],
+                           capture_output=True, text=True, errors="replace", timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return
+    if (APP + ".exe") not in (r.stdout or ""):
+        return
+    print("[..] 检测到 %s.exe 正在运行，先停掉（不停的话打包会失败）" % APP)
+    subprocess.run(["taskkill", "/IM", APP + ".exe", "/T", "/F"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.5)
+
+
 def build() -> int:
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--windowed", "--onedir", "--name", APP,
@@ -139,6 +160,7 @@ def main() -> int:
         return fail("本脚本只能在 Windows 上运行（mac 用 package_mac.py）")
     if not ensure_deps():
         return fail("构建依赖安装失败，请手动：pip install " + " ".join(DEPS))
+    stop_running()
     if build() != 0:
         return fail("PyInstaller 构建失败，看上面的报错")
     exe = DIST / APP / (APP + ".exe")
