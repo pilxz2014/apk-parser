@@ -274,6 +274,7 @@ def copy_to_clipboard(text: str) -> bool:
 
 def _win_copy(text: str) -> bool:
     import ctypes
+    import time as _time
 
     CF_UNICODETEXT = 13
     GMEM_MOVEABLE = 0x0002
@@ -281,8 +282,28 @@ def _win_copy(text: str) -> bool:
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
 
-        if not user32.OpenClipboard(None):
+        # ---- 64 位进程的血泪：ctypes 默认 restype 是 32 位 int，HANDLE 会被
+        # 截断。GlobalAlloc 返回 64 位句柄（现代 Windows 堆常在 >4GB 地址），
+        # 截断后 GlobalLock/SetClipboardData 拿垃圾句柄 → 必失败。
+        # 必须显式声明：GlobalAlloc/GlobalLock 返回 c_void_p。
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalAlloc.argtypes = (ctypes.c_uint, ctypes.c_size_t)
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = (ctypes.c_void_p,)
+        kernel32.GlobalUnlock.argtypes = (ctypes.c_void_p,)
+        user32.SetClipboardData.restype = ctypes.c_void_p
+        user32.SetClipboardData.argtypes = (ctypes.c_uint, ctypes.c_void_p)
+
+        # OpenClipboard 可能因别的进程正占着剪贴板而短暂失败 → 重试几次
+        opened = False
+        for _ in range(8):
+            if user32.OpenClipboard(None):
+                opened = True
+                break
+            _time.sleep(0.05)
+        if not opened:
             return False
+        handle = None
         try:
             user32.EmptyClipboard()
             buf = ctypes.create_unicode_buffer(text)
@@ -296,10 +317,15 @@ def _win_copy(text: str) -> bool:
             ctypes.memmove(ptr, buf, size)
             kernel32.GlobalUnlock(handle)
             if not user32.SetClipboardData(CF_UNICODETEXT, handle):
+                # 失败时所有权仍在自己手里，要归还，否则泄漏
+                kernel32.GlobalFree(handle)
                 return False
+            handle = None  # 成功后所有权移交剪贴板，系统负责释放
             return True
         finally:
             user32.CloseClipboard()
+            if handle:
+                kernel32.GlobalFree(handle)
     except Exception:
         return False
 
