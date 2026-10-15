@@ -1175,6 +1175,29 @@ def cmd_install_one(ns) -> int:
             console.ok("已在独立控制台窗口中开始安装")
         return 0
 
+    # ---- 先把要装的东西亮出来：双击 apk 弹出的黑窗口不该一上来就是空白 ----
+    # （--json 是稳定契约，绝不掺非 JSON 输出；--console 分支由新窗口的自己打印）
+    if not ns.json:
+        from .core import apk as _apk_mod
+        for _f in ns.apk:
+            _info = _apk_mod.parse_apk(_f, with_signature=False, with_icon=False,
+                                       verify_signature=False)
+            if not _info.ok:
+                console.warn("%s：解析失败（%s），仍会尝试安装" % (
+                    Path(_f).name, _info.error))
+                continue
+            console.banner(_info.app_label or _info.file_name, _info.path)
+            console.kv([
+                ("包名", _info.package or "-"),
+                ("版本", "v%s (build %s)" % (_info.version_name or "-",
+                                             _info.version_code or "-")),
+                ("大小", "%s（解压后 %s）" % (human_size(_info.file_size),
+                                             human_size(sum(_info.size_breakdown.values())))),
+                ("SDK", "min %d / target %d" % (_info.min_sdk, _info.target_sdk)),
+                ("ABI", " / ".join(_info.abis) or "（无 native 库）"),
+            ])
+        print()
+
     def run(downgrade: bool) -> dict:
         return installer.install(list(ns.apk), device=ns.device,
                                  reinstall=not ns.no_reinstall,
