@@ -15,7 +15,9 @@
 """
 
 import re
-from typing import Dict, List, Optional
+import threading
+import time
+from typing import Dict, List, Optional, Tuple
 
 from ...platform import paths
 from ..device import adb as adb_mod
@@ -193,6 +195,111 @@ def _from_dumpsys_as_dict(package: str, serial: str) -> List[dict]:
 def _resolve_launcher(package: str, serial: str) -> str:
     """`cmd package resolve-activity` 查启动入口（兜底）。"""
     return intent_mod.launcher_component(package, serial)
+
+
+# ---------------------------------------------------------------- 对外可启动
+#
+# 「这个组件能不能被外部（adb shell / 别的应用）拉起来」在 manifest 里就是
+# `android:exported` —— `dumpsys` 给不出（见文件头实测结论），只能解析 APK。
+#
+# 之所以单独开一个带缓存的入口：Activity 堆栈那种页面**每刷一次就想问一遍**
+# 「栈里这些 Activity 哪些是导出的」。真机实测（Z21 / com.android.settings）
+# 单次 1.2~2.5s（拉包 + 解 manifest + arsc），无缓存的话刷新一次页面就要白等
+# 好几秒。缓存放进程内、TTL 5 分钟；装/卸包时由 `forget_exported()` 主动清掉。
+
+_EXPORTED_TTL = 300.0
+_exported_cache: Dict[Tuple[str, str], Tuple[float, dict]] = {}
+_exported_lock = threading.RLock()
+
+
+def exported_activities(package: str, device: str = "",
+                        refresh: bool = False) -> dict:
+    """设备上某个包的 Activity → 能不能被外部启动。
+
+    返回 `{ok, package, device, activities, count, exportedCount, sources, cached}`，
+    `activities` 的键是**全限定类名**（与 `Component.name` 一致）：
+
+        {exported, enabled, hasLauncher, launchable, target, source}
+
+    `exported` 为 `None` = **未知**（拉包失败走了 dumpsys 回退，那条路没有导出
+    状态）。调用方必须把 None 和 False 分开处理 —— 前者该说"未知"，说成
+    "不可启动"就是编数据。
+    """
+    package = (package or "").strip()
+    if not package:
+        return {"ok": False, "error": "缺少包名", "activities": {}, "count": 0}
+    try:
+        serial = adb_mod.pick_device(device)
+    except adb_mod.AdbError as e:
+        return {"ok": False, "error": str(e), "activities": {}, "count": 0,
+                "package": package}
+
+    key = (serial, package)
+    now = time.time()
+    with _exported_lock:
+        hit = _exported_cache.get(key)
+        if hit and not refresh and now - hit[0] < _EXPORTED_TTL:
+            out = dict(hit[1])
+            out["cached"] = True
+            out["cacheAge"] = round(now - hit[0], 1)
+            return out
+
+    try:
+        items = list_components(package, ctype="activity", device=serial,
+                                refresh=refresh)
+    except Exception as e:
+        return {"ok": False, "error": "%s: %s" % (type(e).__name__, e),
+                "activities": {}, "count": 0,
+                "package": package, "device": serial}
+
+    acts: Dict[str, dict] = {}
+    sources = set()
+    for c in items:
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        sources.add(c.get("source") or "")
+        acts[name] = {
+            "exported": c.get("exported"),          # None = 未知，别当 false
+            "enabled": c.get("enabled"),
+            "hasLauncher": bool(c.get("hasLauncher")),
+            "launchable": bool(c.get("launchable")),
+            "target": c.get("target") or "",
+            "source": c.get("source") or "",
+        }
+
+    if not acts:
+        # 一个都没读到 = 没读到，不是"这个包没有导出的组件"。调用方（Activity
+        # 堆栈）看到的包**一定**有 Activity，所以空结果只可能是包名错 / 拉包失败，
+        # 返回 ok=False 让界面说"未知"，别让它渲染成"全都不行"。
+        return {"ok": False, "activities": {}, "count": 0,
+                "package": package, "device": serial,
+                "error": "没读到任何 Activity（包名不对，或拉包 / 解析 manifest 失败）"}
+
+    out = {
+        "ok": True, "package": package, "device": serial,
+        "activities": acts, "count": len(acts),
+        "exportedCount": sum(1 for a in acts.values() if a["exported"] is True),
+        # 走的是 APK manifest 还是 dumpsys 回退 —— 后者没有导出状态，界面得说明
+        "sources": sorted(s for s in sources if s),
+        "cached": False,
+    }
+    with _exported_lock:
+        _exported_cache[key] = (now, out)
+    return out
+
+
+def forget_exported(package: str = "") -> int:
+    """丢掉「对外可启动」缓存（装/卸/停用包之后要调，否则最多错 5 分钟）。"""
+    with _exported_lock:
+        if not package:
+            n = len(_exported_cache)
+            _exported_cache.clear()
+            return n
+        gone = [k for k in _exported_cache if k[1] == package]
+        for k in gone:
+            _exported_cache.pop(k, None)
+        return len(gone)
 
 
 # ---------------------------------------------------------------- 启动

@@ -2265,7 +2265,14 @@ VIEWS['device.stack'] = async function (host, cap, q) {
   const kw = el('input', { type: 'search', placeholder: '按包名 / 类名过滤…', value: q.filter || '' });
   const visOnly = el('input', { type: 'checkbox' });
   const out = el('div');
+  /* 「哪些 Activity 对外可启动」跟堆栈是**两个来源**：dumpsys 里没有 exported，
+     只能解析 APK 的 manifest（首次 1~2.5s/包）。所以分两趟走 —— 堆栈先出来，
+     导出状态随后补上；补上了才画「☆ 收藏入口」，拿不到就什么都不画（不猜）。 */
+  const exHint = el('div', { class: 'stk-extip' });
   let data = null;
+  let loadSeq = 0;
+  let exMap = {};                    // 全限定类名 → {exported, enabled, target…}
+  let exState = { loading: false, done: false, errors: {}, requested: 0 };
   const opened = new Set();          // d-${id} / t-${id} / a-${taskId}-${index}
 
   host.appendChild(card('当前设备堆栈',
@@ -2274,25 +2281,143 @@ VIEWS['device.stack'] = async function (host, cap, q) {
       el('div', { class: 'grow' }, kw),
       el('label', { class: 'check' }, visOnly, '只看可见任务'),
       el('button', { class: 'btn primary', onclick: () => load(false) }, '刷新'),
-      el('button', { class: 'btn', onclick: () => load(true) }, '强制重读'))));
+      el('button', { class: 'btn', onclick: () => load(true) }, '强制重读')),
+    exHint));
   host.appendChild(out);
 
   kw.addEventListener('input', () => { if (data) paint(); });
   visOnly.addEventListener('change', () => { if (data) paint(); });
 
   async function load(force) {
+    const seq = ++loadSeq;
     out.innerHTML = '';
     out.appendChild(spinner('读取设备堆栈…'));
+    exState = { loading: false, done: false, errors: {}, requested: 0 };
+    paintExHint();
     try {
       data = await api('/api/device/stack', {
         params: { device: devParam(), refresh: force ? '1' : '' },
       });
+      if (seq !== loadSeq) return;
       paint();
+      resolveExported(data);
     } catch (e) {
+      if (seq !== loadSeq) return;
       data = null;
       out.innerHTML = '';
       out.appendChild(notice('bad', e.message));
     }
+  }
+
+  /** 一次把整批包问完。
+      **别按包循环发请求** —— 后端每个包都要拉一次 APK 解析 manifest，
+      循环发只会把等待时间乘上队列长度，而且缓存反而更难命中。 */
+  async function resolveExported(r) {
+    const pkgs = ((r && r.packages) || []).filter(Boolean);
+    if (!pkgs.length) return;
+    const seq = loadSeq;
+    exState = { loading: true, done: false, errors: {}, requested: pkgs.length };
+    paintExHint();
+    const found = {};
+    let errors = {};
+    try {
+      const res = await api('/api/launch/exported', {
+        params: { pkgs: pkgs.join(','), device: devParam() },
+      });
+      for (const pkg of Object.keys(res.packages || {})) {
+        const acts = res.packages[pkg] || {};
+        for (const cls of Object.keys(acts)) {
+          found[cls] = Object.assign({ pkg }, acts[cls]);
+        }
+      }
+      errors = res.errors || {};
+    } catch (e) {
+      errors = { '(全部)': e.message };
+    }
+    if (seq !== loadSeq) return;      // 期间又刷了一次 → 这份结果已经过期
+    exMap = found;
+    exState = { loading: false, done: true, errors, requested: pkgs.length };
+    paintExHint();
+    if (data) paint();
+  }
+
+  function paintExHint() {
+    exHint.innerHTML = '';
+    if (exState.loading) {
+      exHint.appendChild(el('span', { class: 'stk-dim' },
+        '正在确认哪些 Activity 可以外部启动…（要读一遍设备上 APK 的 manifest，'
+        + '首次每个包 1~2 秒，之后走缓存）'));
+      return;
+    }
+    if (!exState.done) return;
+    const keys = Object.keys(exMap);
+    if (!keys.length) {
+      exHint.appendChild(el('span', { class: 'stk-dim' },
+        '没能确认「能否外部启动」——这需要解析 APK 的 manifest，读不到就不显示收藏入口（不猜）'));
+      return;
+    }
+    // 这里数的必须是**真的会出现按钮**的那些：exported 但 enabled=false 的
+    // 不会给入口，提示里把它们算成"可启动"就是在骗人
+    const okN = keys.filter((k) => exMap[k].exported === true
+      && exMap[k].enabled !== false).length;
+    exHint.appendChild(el('span', { class: 'stk-dim' }, okN
+      ? `已确认 ${okN} / ${keys.length} 个 Activity 对外可启动，它们那一行会多一个「☆ 收藏入口」`
+      : `确认了 ${keys.length} 个 Activity，都不对外可启动（没有导出入口，或组件被停用）—— 所以没有收藏入口`));
+    const failed = Object.keys(exState.errors || {});
+    if (failed.length) {
+      exHint.appendChild(el('span', { class: 'stk-dim' },
+        `；另有 ${failed.length} 个包没读到（拉包失败 / 系统应用），那些 Activity 状态未知，不给入口`));
+    }
+  }
+
+  /** 这个 Activity 的导出状态；查不到返回 null（界面就不画入口）。 */
+  function exportedOf(a) {
+    if (!a) return null;
+    for (const c of [a.fullClass, a.className, a.component]) {
+      if (!c) continue;
+      if (exMap[c]) return exMap[c];
+      // dumpsys 里相对类名写作 `.ui.Wifi`，manifest 给的是全限定名
+      if (c.charAt(0) === '.' && a.package && exMap[a.package + c]) {
+        return exMap[a.package + c];
+      }
+    }
+    return null;
+  }
+
+  /** 只有**确实 exported、且没被停用**的才给收藏入口：
+      `<activity android:enabled="false">` 存下来下次点照样起不来。 */
+  function canCollect(a) {
+    const ex = exportedOf(a);
+    return (ex && ex.exported === true && ex.enabled !== false) ? ex : null;
+  }
+
+  /** 存进「启动组件 → 我的入口」。存的是 am 能直接吃的组件写法。 */
+  async function collectEntry(a, ex) {
+    const target = ex.target || a.component || '';
+    if (!target) {
+      toast('这个 Activity 拿不到可启动的组件写法，去「启动」那一格手动配一条', 'bad');
+      return;
+    }
+    const tail = String(target).split('/').pop().split('.').pop() || '入口';
+    const guess = (a.appLabel ? a.appLabel + ' · ' : '') + tail;
+    const name = await ask({
+      title: '收藏启动入口',
+      message: '存进「启动组件 → 我的入口」，以后一点就走（名字随时可改）',
+      value: guess, placeholder: tail,
+    });
+    if (!name) return;
+    try {
+      const r = await api('/api/launch/shortcut', {
+        method: 'POST',
+        body: {
+          op: 'add', name, component: target,
+          intent: { kind: 'activity', target, package: a.package || '' },
+          note: '来自 Activity 堆栈',
+        },
+      });
+      if (r.ok) toast((r.detail || '已收藏') + '，在「启动组件 → 我的入口」里', 'ok');
+      else toast(r.detail || '收藏失败', 'bad');
+    } catch (e) { toast('收藏失败：' + e.message, 'bad'); }
   }
 
   function hits(text) {
@@ -2390,6 +2515,15 @@ VIEWS['device.stack'] = async function (host, cap, q) {
         onclick: () => go('device.launch.start', { pkg: top.package, component: top.component }),
       }, '用启动器打开'));
     }
+    // 当前界面这一格是常显的，比"悬停才出现的行内按钮"更容易被发现
+    const exTop = canCollect(top);
+    if (exTop) {
+      acts.appendChild(el('button', {
+        class: 'btn',
+        title: '这个 Activity 对外可启动 —— 存进「启动组件 → 我的入口」',
+        onclick: () => collectEntry(top, exTop),
+      }, '☆ 收藏启动入口'));
+    }
 
     return card('当前界面', null,
       el('div', { class: 'stk-hero' }, main, acts));
@@ -2477,6 +2611,8 @@ VIEWS['device.stack'] = async function (host, cap, q) {
     const cls = 'stk-row stk-act-hd interactive'
       + (a.isResumed ? ' on' : '')
       + (a.isFocused ? ' focused' : '');
+    // 对外可启动 → 这一行会有「☆ 收藏入口」。未知（拿不到 manifest）当没有。
+    const ex = canCollect(a);
 
     const meta = el('div', { class: 'stk-meta' });
     if (a.package) meta.appendChild(el('span', {}, a.package));
@@ -2507,6 +2643,13 @@ VIEWS['device.stack'] = async function (host, cap, q) {
         onclick: (e) => { e.stopPropagation(); go('device.launch.start', { pkg: a.package, component: a.component }); },
       }, '启动'));
     }
+    if (ex) {
+      acts.appendChild(el('button', {
+        class: 'btn sm',
+        title: '这个 Activity 对外可启动 —— 存进「启动组件 → 我的入口」，以后一点就走',
+        onclick: (e) => { e.stopPropagation(); collectEntry(a, ex); },
+      }, '☆ 收藏入口'));
+    }
 
     const row = el('div', { class: cls, onclick: () => {
       opened.has(key) ? opened.delete(key) : opened.add(key);
@@ -2517,6 +2660,7 @@ VIEWS['device.stack'] = async function (host, cap, q) {
       stateTag(a),
       a.isFocused ? tag('当前焦点', 'brand') : null,
       a.isTop ? tag('栈顶', 'plain') : null,
+      ex ? tag('可外部启动', 'brand') : null,
       a.appLabel ? el('span', { class: 'stk-dim' }, a.appLabel) : null,
       el('span', { class: 'stk-sp' }),
       acts);

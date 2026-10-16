@@ -47,7 +47,9 @@ def uninstall(package: str, device: str = "", keep_data: bool = False) -> dict:
     if res["ok"]:
         try:
             from . import signature as sig_mod
+            from ..launch import components as comp_mod
             sig_mod.invalidate(package)
+            comp_mod.forget_exported(package)
         except Exception:
             pass
     return res

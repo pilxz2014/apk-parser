@@ -424,6 +424,8 @@ def h_app_action(ctx):
         apps_mod.app_action(ctx.pkg, op, ctx.field("device", ""))
     _APP_CACHE["ts"] = 0
     sign_mod.invalidate(ctx.pkg)
+    # 停用/卸载会改变「这个 Activity 还能不能被外部启动」的答案
+    comp_mod.forget_exported(ctx.pkg)
     return res
 
 
@@ -954,6 +956,54 @@ def h_components(ctx):
         pkg, ctype=ctx.q("type"), device=ctx.q("device"),
         source=ctx.q("source", "auto"), refresh=ctx.qb("refresh", False))
     return {"ok": True, "package": pkg, "count": len(items), "components": items}
+
+
+@route("GET", r"/api/launch/exported")
+@route("POST", r"/api/launch/exported")
+def h_launch_exported(ctx):
+    """「这些包里哪些 Activity 对外可启动」—— Activity 堆栈视图用。
+
+    `dumpsys` 给不出 exported，只能解析 manifest：首次约 1~2.5s/包，
+    之后走 5 分钟进程内缓存（见 `components.exported_activities`）。
+    所以这里**一次收一批包**，别让前端按包循环发请求。
+
+    参数收三种写法：`pkg=com.x`、`pkgs=com.x,com.y`、
+    body 里 `packages: ["com.x", "com.y"]`。
+
+    返回 `packages: {包名: {全限定类名: {...}}}`。里面 `exported` 为 null
+    表示**未知**（拉包失败退到了 dumpsys），调用方要说"未知"而不是"不可启动"。
+    """
+    device = ctx.field("device", None) or ctx.q("device")
+    pkgs: List[str] = []
+    raw = ctx.field("packages", None)
+    if isinstance(raw, list):
+        pkgs += [str(x) for x in raw]
+    elif isinstance(raw, str):
+        pkgs += raw.split(",")
+    for extra in (ctx.field("pkg", None), ctx.q("pkgs"), ctx.q("pkg")):
+        if isinstance(extra, str) and extra:
+            pkgs += extra.split(",")
+
+    seen, order = set(), []
+    for p in pkgs:
+        p = p.strip()
+        if p and p not in seen:
+            seen.add(p)
+            order.append(p)
+    # 一个堆栈里几十个包都往里塞的话，这一条请求会跑成分钟级 —— 截断，
+    # 库里没有的包前端本来就点不到
+    order = order[:12]
+
+    packages: Dict[str, dict] = {}
+    errors: Dict[str, str] = {}
+    for p in order:
+        r = comp_mod.exported_activities(p, device=device or "")
+        if r.get("ok"):
+            packages[p] = r.get("activities") or {}
+        else:
+            errors[p] = r.get("error") or "读取失败"
+    return {"ok": True, "device": device or "", "packages": packages,
+            "errors": errors, "count": len(packages), "requested": order}
 
 
 @route("POST", r"/api/launch/preview")

@@ -333,6 +333,11 @@ input.mono, .mono { font-family: var(--mono); font-size: 12px; }
   .stk-hero-acts { justify-content: flex-start; }
 }
 
+/* 「可外部启动」确认行。它比堆栈慢一步到（要解析 APK 的 manifest），
+   先在这儿说清楚"还在查 / 查到几个 / 为什么没有" —— 空着就等于没解释。 */
+.stk-extip { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 9px; }
+.stk-extip:empty { display: none; }
+
 /* 折叠树 */
 .stk-tree { display: flex; flex-direction: column; gap: 3px; }
 .stk-kids {
