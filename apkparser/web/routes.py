@@ -34,7 +34,8 @@ from ..core.install import precheck as precheck_mod
 from ..core.launch import components as comp_mod
 from ..core import scripts as scripts_mod
 from ..core.launch import history as hist_mod
-from ..core.launch.intent import COMMON_ACTIONS, COMMON_FLAGS, Intent, flag_catalog
+from ..core.launch.intent import (COMMON_ACTIONS, COMMON_FLAGS, Intent,
+                                 flag_catalog, launch_presets)
 from ..platform import filedialog as filedialog_mod
 from ..platform import finders, local_fs, menu, paths
 from . import tasks as tasks_mod
@@ -1122,6 +1123,9 @@ def h_launch_catalog(ctx):
         "commonFlags": COMMON_FLAGS,
         "commonActions": COMMON_ACTIONS,
         "extrasTypes": ["string", "int", "bool", "float", "long", "uri", "string-array", "int-array", "null"],
+        # 「启动方式」预设（原样 / 桌面图标方式 / 冷启动）—— 定义在 intent.py，
+        # 和 `-W -S -a MAIN -c LAUNCHER` 的拼装是同一个真相源
+        "presets": launch_presets(),
     }
 
 

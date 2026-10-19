@@ -427,6 +427,9 @@ class Intent:
     extras: List[Extra] = field(default_factory=list)
     user: str = ""
     wait: bool = False
+    # `am start -S`：先把目标包 force-stop 再拉起。旧进程/旧 Activity 有时会让
+    # 启动看起来"没反应"（intent 直接投给已在栈顶的实例），冷启动路径能排除它。
+    force_stop: bool = False
     pkg: str = ""                   # 仅广播时用于 -p 限定包
     # 解析不出来时，设备上"可能属于这个类名"的包名候选（给用户点，不自动用）
     resolve_candidates: List[str] = field(default_factory=list)
@@ -582,6 +585,27 @@ class Intent:
 
     # -- 命令行 ------------------------------------------------------
 
+    def apply_preset(self, preset_id: str) -> "Intent":
+        """套一个「启动方式」预设（见 `LAUNCH_PRESETS`）。
+
+        规则：**预设先铺底，已经给了的字段不覆盖** —— 这样
+        `--preset launcher -a android.intent.action.VIEW` 里的显式 Action 仍然有效。
+        预设里没有"关掉某个布尔值"的能力（`-W`/`-S` 只能加上、不能减掉），
+        因为界面上的勾选框本来就是最终真相，预设只是帮你把勾打上。
+        """
+        patch = preset_patch(preset_id)
+        if not patch:
+            return self
+        if patch.get("action"):
+            self.action = self.action or patch["action"]
+        if patch.get("categories"):
+            self.categories = self.categories or list(patch["categories"])
+        if patch.get("wait"):
+            self.wait = True
+        if patch.get("forceStop"):
+            self.force_stop = True
+        return self
+
     @property
     def am_command(self) -> str:
         return {"activity": "start", "service": "startservice", "broadcast": "broadcast"}[self.kind]
@@ -610,6 +634,10 @@ class Intent:
         args: List[str] = []
         if self.wait and self.kind == "activity":
             args.append("-W")
+        # `-S` 只有 `am start` 认（`am startservice` 没有这个开关），所以和 -W
+        # 一样按 kind 收口 —— 否则服务/广播会收到一条 am 直接拒绝的命令。
+        if self.force_stop and self.kind == "activity":
+            args.append("-S")
 
         target = self.normalized_target
         if target:
@@ -677,6 +705,7 @@ class Intent:
         intent.categories = [c for c in (getattr(ns, "cat", None) or []) if c]
         intent.flags = [f for f in (getattr(ns, "flag", None) or []) if f]
         intent.wait = bool(getattr(ns, "wait", False))
+        intent.force_stop = bool(getattr(ns, "force_stop", False))
         intent.user = getattr(ns, "user", "") or ""
         intent.pkg = getattr(ns, "package", "") or ""
         for kind, attr in (("string", "es"), ("int", "ei"), ("bool", "ez"),
@@ -685,6 +714,7 @@ class Intent:
                 if len(pair) == 2:
                     intent.extras.append(Extra(key=pair[0], value=pair[1], type=kind))
         intent.kind = "broadcast" if getattr(ns, "cmd", "") == "broadcast" else "activity"
+        intent.apply_preset(getattr(ns, "preset", "") or "")
         return intent
 
     @classmethod
@@ -699,9 +729,15 @@ class Intent:
             flags=list(d.get("flags") or []),
             user=str(d.get("user") or ""),
             wait=bool(d.get("wait")),
+            # 前端传驼峰、老数据/CLI 可能传下划线，两种都认
+            force_stop=bool(d.get("forceStop") if d.get("forceStop") is not None
+                            else d.get("force_stop")),
             pkg=d.get("package", "") or d.get("pkg", ""),
         )
         it.extras = [Extra.from_dict(x) for x in (d.get("extras") or [])]
+        # `preset` 只是给 CLI / 三方调用用的糖；前端是把预设填进各字段再提交的，
+        # 所以哪个字段都不缺。两边的落点都是**同一批字段**，不会出现预览/执行不一致。
+        it.apply_preset(d.get("preset") or "")
         return it
 
     def to_dict(self) -> dict:
@@ -718,6 +754,8 @@ class Intent:
             "extras": [e.to_dict() for e in self.extras],
             "user": self.user,
             "wait": self.wait,
+            # 收藏 / 历史 / 预览都靠这个字段原样带回，缺了它「冷启动」一存就退化
+            "forceStop": bool(self.force_stop),
             "package": self.pkg,
             # 解析不出来时给用户挑的候选；界面把它渲染成可点的标签
             "resolveCandidates": list(self.resolve_candidates or []),
@@ -735,6 +773,64 @@ def flag_catalog() -> List[dict]:
         {"name": n, "value": "0x%08X" % v, "common": n in COMMON_FLAGS}
         for n, v in sorted(FLAGS.items(), key=lambda kv: -kv[1])
     ]
+
+
+# ---------------------------------------------------------------- 启动方式预设
+#
+# 真机上很常见的一类"起不来"：组件名没错、exported 也是 true，但 Activity 里
+# 读了 `getIntent().getAction()/categories` 做校验，只认桌面图标那一条意图；
+# 或者旧进程还活着，intent 被直接投给已在栈顶的实例，看起来像没反应。
+# 这时手写成 `am start -W -S -a MAIN -c LAUNCHER -n pkg/Cls` 就能起来。
+#
+# 预设放在这里（而不是前端硬编码）的理由和整条 Intent 一样：预览、执行、
+# CLI、收藏必须是同一组参数，不能各写一份。
+
+LAUNCHER_ACTION = "android.intent.action.MAIN"
+LAUNCHER_CATEGORY = "android.intent.category.LAUNCHER"
+
+LAUNCH_PRESETS = [
+    {
+        "id": "launcher",
+        "label": "桌面图标方式",
+        "desc": "模拟点桌面图标：-W -S -a MAIN -c LAUNCHER。"
+                "Activity 若读 action / categories 做启动校验，只有这一组能过",
+        "patch": {
+            "action": LAUNCHER_ACTION,
+            "categories": [LAUNCHER_CATEGORY],
+            "wait": True,
+            "forceStop": True,
+        },
+    },
+    {
+        "id": "cold",
+        "label": "冷启动",
+        "desc": "先 am force-stop（-S）再拉起，排除旧进程 / 栈顶实例的干扰；配 -W 看耗时",
+        "patch": {"wait": True, "forceStop": True},
+    },
+]
+
+
+def launch_presets() -> List[dict]:
+    """给界面用的启动方式列表（深拷贝一份，别让调用方改到常量）。"""
+    out = []
+    for p in LAUNCH_PRESETS:
+        out.append({
+            "id": p["id"],
+            "label": p["label"],
+            "desc": p["desc"],
+            "patch": dict(p["patch"], categories=list(p["patch"].get("categories") or []))
+            if p["patch"] else {},
+        })
+    return out
+
+
+def preset_patch(preset_id: str) -> Optional[dict]:
+    """按 id 取预设的参数（找不到返回 None —— 调用方据此报错，而不是静默套错）。"""
+    pid = (preset_id or "").strip()
+    for p in launch_presets():
+        if p["id"] == pid:
+            return p["patch"]
+    return None
 
 
 # ---------------------------------------------------------------- 兼容包装

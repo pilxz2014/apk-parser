@@ -1755,8 +1755,13 @@ function compTarget(c, pkg) {
   return pkg + '/' + name;
 }
 
-async function launchNow(component, pkg) {
+/* `opts.preset`：交给后端套「启动方式」预设（launcher = 桌面图标方式：
+   -W -S -a MAIN -c LAUNCHER）。**不在前端拼这些参数** —— 预设定义在
+   core/launch/intent.py，前端再抄一份就会出现"界面说是这样、实际发的是那样"。 */
+async function launchNow(component, pkg, opts) {
   try {
+    const body = { target: component, pkg: pkg || '', kind: 'activity', device: devParam() };
+    if (opts && opts.preset) body.preset = opts.preset;
     const r = await api('/api/launch/start', {
       method: 'POST',
       // pkg 一定要带上：组件清单里的 name 是**全限定类名**（com.x.y.ui.MainActivity），
@@ -1764,7 +1769,7 @@ async function launchNow(component, pkg) {
       // 否则会得到一条空命令 `adb shell am start`。
       // 注意：代码包名和安装包名不同源时（com.jxw.aizx.teacher 的类在
       // com.jxw.teacher.* 下），拼出来的是 `pkg/全限定类名`，那同样是合法写法。
-      body: { target: component, pkg: pkg || '', kind: 'activity', device: devParam() },
+      body,
     });
     if (r.ok) toast('已启动 ' + (r.component || component), 'ok');
     else toast(r.detail || '启动失败', 'bad');
@@ -3161,6 +3166,10 @@ VIEWS['device.app.uninstall'] = appActionsView;
 VIEWS['device.launch.list'] = async function (host, cap, q) {
   const pkg = await pkgInput('com.example.app', q.pkg || '');
   const out = el('div');
+  // 有些入口（读 getIntent().action 做校验的、启动时会先看是不是桌面点击的）
+  // 直接 `am start -n` 起不来，必须带上桌面图标那组 Intent。这里给一个开关，
+  // 让「直接启动」按需改走预设 —— 失败时手忙脚乱地去翻参数是最烦的。
+  const asLauncher = el('input', { type: 'checkbox' });
   const run = async (refresh) => {
     const p = pkg.value.trim();
     if (!p) { toast('请填包名', 'bad'); return; }
@@ -3189,7 +3198,10 @@ VIEWS['device.launch.list'] = async function (host, cap, q) {
               },
             }, '编辑'),
             el('button', {
-              class: 'btn sm primary', onclick: (e) => { e.stopPropagation(); launchNow(compTarget(c, p), p); },
+              class: 'btn sm primary', onclick: (e) => {
+                e.stopPropagation();
+                launchNow(compTarget(c, p), p, asLauncher.checked ? { preset: 'launcher' } : null);
+              },
             }, '直接启动')),
         },
       ], rows, { filter: true, filterPlaceholder: '过滤组件…', emptyText: '没解析到组件' })));
@@ -3199,7 +3211,11 @@ VIEWS['device.launch.list'] = async function (host, cap, q) {
     el('div', { class: 'row' },
       el('div', { class: 'grow' }, pkg),
       el('button', { class: 'btn primary', onclick: () => run(false) }, '列出组件'),
-      el('button', { class: 'btn', onclick: () => run(true) }, '忽略缓存'))));
+      el('button', { class: 'btn', onclick: () => run(true) }, '忽略缓存')),
+    el('div', { class: 'row', style: { marginTop: '6px', alignItems: 'center' } },
+      el('label', { class: 'check' }, asLauncher, '直接启动时用桌面图标方式'),
+      el('span', { style: { color: 'var(--dim)', fontSize: '11.5px' } },
+        '（-W -S -a MAIN -c LAUNCHER；起不来的入口先勾上再试）'))));
   host.appendChild(out);
   if (q.pkg) run(false);
 };
@@ -3234,6 +3250,9 @@ const launchOwnTab = async function (host, cap, q) {
     extras: (seed && seed.extras) ? seed.extras.map((x) => ({ key: x.key, value: x.value, type: x.type })) : [],
     user: (seed && seed.user) || '',
     wait: !!(seed && seed.wait),
+    // 收藏下来的「冷启动 / 桌面图标方式」必须原样带回来，否则一点就走那条入口
+    // 就退化成了裸 `am start -n`（正是当初起不来的那条命令）
+    forceStop: !!(seed && (seed.forceStop || seed.force_stop)),
   };
 
   const target = el('input', { type: 'text', class: 'mono', placeholder: 'com.example/.ui.MainActivity', value: st.target });
@@ -3248,6 +3267,7 @@ const launchOwnTab = async function (host, cap, q) {
   const mime = el('input', { type: 'text', class: 'mono', placeholder: 'image/*', value: st.mimeType });
   const userI = el('input', { type: 'text', class: 'mono', placeholder: '0', style: { width: '90px' }, value: st.user });
   const waitC = el('input', { type: 'checkbox', checked: st.wait });
+  const forceC = el('input', { type: 'checkbox', checked: st.forceStop });
   const catI = el('input', { type: 'text', class: 'mono', placeholder: '输入后回车加入' });
 
   if (!$('#dl-actions')) {
@@ -3376,17 +3396,47 @@ const launchOwnTab = async function (host, cap, q) {
     st.mimeType = mime.value.trim();
     st.user = userI.value.trim();
     st.wait = waitC.checked;
+    st.forceStop = forceC.checked;
   }
   function bodyOf() {
     return {
       kind: st.kind, target: st.target, pkg: st.pkg, action: st.action, data: st.data,
       mimeType: st.mimeType, categories: st.categories, flags: st.flags,
-      extras: st.extras, user: st.user, wait: st.wait,
+      extras: st.extras, user: st.user, wait: st.wait, forceStop: st.forceStop,
     };
   }
 
   [target, pkgI, action, dataI, mime, userI].forEach((i) => i.addEventListener('input', preview));
   waitC.addEventListener('change', preview);
+  forceC.addEventListener('change', preview);
+
+  /* 「启动方式」：一键把常用的特殊参数填进表单。
+     参数组本身就定义在后端（core/launch/intent.py 的 LAUNCH_PRESETS），
+     这里只负责填字段 —— 前端再抄一份，迟早会出现"界面说这样、实际发那样"。
+     典型病灶：Activity 里读 getIntent().getAction()/categories 做启动校验，
+     裸 `am start -n` 一定起不来，带上 -a MAIN -c LAUNCHER 才行。 */
+  function applyPresetById(id, overwrite) {
+    const p = (catalog.presets || []).find((x) => x.id === id);
+    const patch = (p && p.patch) || {};
+    // overwrite=false（点按钮）：只补空着的字段，不清用户已经填好的东西
+    // overwrite=true（失败重试）：按这个预设的语义**覆盖** —— 用户点的是"换这种方式再来一次"
+    if (patch.action && (overwrite || !action.value.trim())) action.value = patch.action;
+    if ((patch.categories || []).length && (overwrite || !st.categories.length)) {
+      st.categories = patch.categories.slice();
+      paintCats();
+    }
+    if (patch.wait) waitC.checked = true;
+    if (patch.forceStop) forceC.checked = true;
+    sync();
+  }
+
+  const presetBox = el('div', { class: 'row' });
+  (catalog.presets || []).forEach((p) => {
+    presetBox.appendChild(el('button', {
+      class: 'btn sm', title: p.desc || '',
+      onclick: () => { applyPresetById(p.id, false); preview(); },
+    }, p.label));
+  });
 
   const kindSeg = el('div', { class: 'seg' },
     ['activity', 'service'].map((k) => el('button', {
@@ -3411,6 +3461,13 @@ const launchOwnTab = async function (host, cap, q) {
         + '比如 com.jxw.aizx.teacher 里所有类都在 com.jxw.teacher.* 下 —— '
         + '这时上面那串全限定类名光靠字符串是拆不出边界的。留空也行，系统会拿设备上已装的包反查。')),
     el('div', { class: 'field' }, el('label', {}, 'Intent 类型'), kindSeg),
+    (catalog.presets || []).length ? el('div', { class: 'field' },
+      el('label', {}, '启动方式（一键套用）'),
+      presetBox,
+      el('div', { style: { color: 'var(--dim)', fontSize: '11.5px', marginTop: '4px' } },
+        '起不来时先试「桌面图标方式」：-W -S -a MAIN -c LAUNCHER。'
+        + '它模拟的是点桌面图标那一下 —— 有些入口会读 action / categories 做启动校验，'
+        + '裸 `am start -n` 过不去。（未导出的组件它救不了，那种是 Permission Denial）')) : null,
     el('div', { class: 'row' },
       el('div', { class: 'grow' }, el('div', { class: 'field' }, el('label', {}, 'Action'), action)),
       el('div', { class: 'grow' }, el('div', { class: 'field' }, el('label', {}, 'MIME'), mime))),
@@ -3423,36 +3480,13 @@ const launchOwnTab = async function (host, cap, q) {
       el('button', { class: 'btn sm', onclick: () => { st.extras.push({ key: '', value: '', type: 'string' }); paintExtras(); } }, '+ 加一个')),
     el('div', { class: 'row' },
       el('div', { class: 'field' }, el('label', {}, '--user'), userI),
-      el('label', { class: 'check' }, waitC, '等待启动完成（-W）')),
+      el('label', { class: 'check', title: '-W：等启动结果并打印 TotalTime / ThisTime' },
+        waitC, '等待启动完成（-W）'),
+      el('label', { class: 'check', title: '-S：先 am force-stop 目标包再拉起，排除旧进程 / 栈顶实例' },
+        forceC, '先强制停止（-S）')),
     el('div', { class: 'row', style: { marginTop: '10px' } },
       el('button', {
-        class: 'btn primary', onclick: async () => {
-          sync();
-          runOut.innerHTML = ''; runOut.appendChild(spinner('执行中…'));
-          try {
-            const r = await api('/api/launch/start', { method: 'POST', body: { ...bodyOf(), device: devParam() } });
-            runOut.innerHTML = '';
-            runOut.appendChild(r.ok ? notice('ok', r.detail || '已发送启动请求') : notice('bad', r.detail || '启动失败'));
-            if (r.command) runOut.appendChild(codeBlock(r.command));
-            if (r.warning) runOut.appendChild(notice('warn', r.warning));
-            if (r.totalTime != null) runOut.appendChild(kvBlock([['TotalTime', r.totalTime + ' ms'], ['ThisTime', (r.thisTime ?? 0) + ' ms']]));
-          } catch (e) {
-            runOut.innerHTML = '';
-            runOut.appendChild(notice('bad', e.message));
-            // 解析不出来时后端会带上"设备上相关的包名"，做成可点的标签 ——
-            // 用户在「所属包名」里填对一次，这条命令就通了。
-            const cands = (e.payload && e.payload.candidates) || [];
-            if (cands.length) {
-              runOut.appendChild(el('div', { class: 'row', style: { marginTop: '8px', alignItems: 'center' } },
-                el('span', { style: { color: 'var(--dim)', fontSize: '12px', marginRight: '6px' } },
-                  '点一下填入「所属包名」：'),
-                ...cands.map((c) => el('span', {
-                  class: 'tag brand', style: { cursor: 'pointer' },
-                  onclick: () => { pkgI.value = c; sync(); preview(); },
-                }, c))));
-            }
-          }
-        },
+        class: 'btn primary', onclick: () => doLaunch(),
       }, '执行'),
       el('button', {
         class: 'btn', onclick: async () => {
@@ -3471,6 +3505,64 @@ const launchOwnTab = async function (host, cap, q) {
         class: 'btn', title: '把当前这条 Intent 存成「我的入口」，下次一点就走',
         onclick: () => saveFavorite(),
       }, '☆ 收藏到我的入口'))));
+
+  /* 执行一次启动。失败时给两样东西：am 报错的中文解释，以及"换个启动方式再试"。
+     为什么要后者：真机上"组件名没错、exported 也是 true，就是起不来"十次里有八次
+     是入口在读 getIntent().getAction()/categories 做校验 —— 这种只能靠桌面图标那组
+     Intent 过。让用户自己回去翻文档、手打 -a MAIN -c LAUNCHER 是最没必要的摩擦。 */
+  async function doLaunch() {
+    sync();
+    const body = { ...bodyOf(), device: devParam() };
+    runOut.innerHTML = ''; runOut.appendChild(spinner('执行中…'));
+    let r;
+    try {
+      r = await api('/api/launch/start', { method: 'POST', body });
+    } catch (e) {
+      runOut.innerHTML = '';
+      runOut.appendChild(notice('bad', e.message));
+      // 解析不出来时后端会带上"设备上相关的包名"，做成可点的标签 ——
+      // 用户在「所属包名」里填对一次，这条命令就通了。
+      const cands = (e.payload && e.payload.candidates) || [];
+      if (cands.length) {
+        runOut.appendChild(el('div', { class: 'row', style: { marginTop: '8px', alignItems: 'center' } },
+          el('span', { style: { color: 'var(--dim)', fontSize: '12px', marginRight: '6px' } },
+            '点一下填入「所属包名」：'),
+          ...cands.map((c) => el('span', {
+            class: 'tag brand', style: { cursor: 'pointer' },
+            onclick: () => { pkgI.value = c; sync(); preview(); },
+          }, c))));
+      }
+      return;
+    }
+    runOut.innerHTML = '';
+    runOut.appendChild(r.ok ? notice('ok', r.detail || '已发送启动请求') : notice('bad', r.detail || '启动失败'));
+    if (r.command) runOut.appendChild(codeBlock(r.command));
+    // 后端对 am 的报错有中文解释（未导出 / 找不到组件 / 权限不足…）。
+    // 以前只显示了 detail 那一行，等于把最有用的那句扔了。
+    if (!r.ok && r.hint) runOut.appendChild(notice('warn', r.hint));
+    if (r.warning) runOut.appendChild(notice('warn', r.warning));
+    if (r.totalTime != null) runOut.appendChild(kvBlock([['TotalTime', r.totalTime + ' ms'], ['ThisTime', (r.thisTime ?? 0) + ' ms']]));
+
+    const denied = /not exported|Permission Denial/i.test((r.detail || '') + ' ' + (r.hint || ''));
+    // 已经按"桌面图标方式"发过了就别再劝一遍 —— 判据取自后端预设本身，
+    // 不在前端抄一份 MAIN/LAUNCHER 字面量（抄了就会和 intent.py 各说各话）
+    const lp = (catalog.presets || []).find((x) => x.id === 'launcher');
+    const launcherAlready = !!lp && body.action === ((lp.patch || {}).action || '\0')
+      && (body.categories || []).indexOf((((lp.patch || {}).categories) || [])[0]) >= 0;
+    if (!r.ok && denied) {
+      // 未导出是 manifest 里定死的，换任何 Intent 都没用 —— 直说，别让人反复点
+      runOut.appendChild(notice('warn',
+        '这不是参数问题：该组件在 manifest 里未导出（android:exported=false），换任何 Intent 都启动不了。'));
+    } else if (!r.ok && !launcherAlready) {
+      runOut.appendChild(el('div', { class: 'row', style: { marginTop: '8px', alignItems: 'center' } },
+        el('button', {
+          class: 'btn', title: '模拟点桌面图标：-W -S -a MAIN -c LAUNCHER',
+          onclick: () => { applyPresetById('launcher', true); preview(); doLaunch(); },
+        }, '用桌面图标方式再试一次'),
+        el('span', { style: { color: 'var(--dim)', fontSize: '11.5px' } },
+          '有些入口会校验 action / categories，裸 am start 进不去')));
+    }
+  }
 
   async function saveFavorite() {
     sync();
@@ -3656,6 +3748,10 @@ VIEWS['device.launch.shortcut'] = async function (host, cap, q) {
           if ((it.flags || []).length) bits.push('flags ' + it.flags.length);
           if (it.data) bits.push('data');
           if ((it.categories || []).length) bits.push('cat ' + it.categories.length);
+          // -W / -S 不是"可有可无的调试开关"：带了 -S 的入口行为明显不同（先杀掉再起），
+          // 列表里看不出来，用户会以为两个入口是一样的
+          if (it.wait) bits.push('-W');
+          if (it.forceStop) bits.push('-S');
           if (it.user) bits.push('user ' + it.user);
           return bits.length
             ? el('span', { style: { color: 'var(--dim)', fontSize: '11.5px' } }, bits.join(' · '))

@@ -1818,6 +1818,15 @@ def _add_intent_args(c) -> None:
     c.add_argument("--el", action="append", nargs=2, default=[], metavar=("K", "V"))
     c.add_argument("--eu", action="append", nargs=2, default=[], metavar=("K", "V"))
     c.add_argument("-W", "--wait", action="store_true", help="等待启动完成并输出 TotalTime")
+    # `-S`：先 force-stop 再拉起。很多时候"启动看起来没反应"是旧进程/栈顶实例
+    # 把 intent 吃掉了，冷启动能排除这种情况（只对 am start 有效，服务/广播没有）
+    c.add_argument("-S", "--force-stop", dest="force_stop", action="store_true",
+                   help="先 am force-stop 目标包再启动（冷启动）")
+    from .core.launch.intent import LAUNCH_PRESETS
+    c.add_argument("--preset", default="", metavar="ID",
+                   choices=[""] + [p["id"] for p in LAUNCH_PRESETS],
+                   help="启动方式预设：launcher=桌面图标方式(-W -S -a MAIN -c LAUNCHER)，"
+                        "cold=冷启动(-W -S)")
     c.add_argument("--package", default="", help="限定包（logcat 过滤用）")
     c.add_argument("--user", default="", help="--user N")
 
