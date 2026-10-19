@@ -585,11 +585,13 @@ class Intent:
 
     # -- 命令行 ------------------------------------------------------
 
-    def apply_preset(self, preset_id: str) -> "Intent":
+    def apply_preset(self, preset_id: str, overwrite: bool = False) -> "Intent":
         """套一个「启动方式」预设（见 `LAUNCH_PRESETS`）。
 
         规则：**预设先铺底，已经给了的字段不覆盖** —— 这样
         `--preset launcher -a android.intent.action.VIEW` 里的显式 Action 仍然有效。
+        `overwrite=True` 是给「把已有入口改成这种方式」用的：用户点的就是
+        "换成桌面图标方式"，保留旧 Action 会得到一条既不是旧方式、也不是新方式的命令。
         预设里没有"关掉某个布尔值"的能力（`-W`/`-S` 只能加上、不能减掉），
         因为界面上的勾选框本来就是最终真相，预设只是帮你把勾打上。
         """
@@ -597,9 +599,10 @@ class Intent:
         if not patch:
             return self
         if patch.get("action"):
-            self.action = self.action or patch["action"]
+            self.action = patch["action"] if overwrite else (self.action or patch["action"])
         if patch.get("categories"):
-            self.categories = self.categories or list(patch["categories"])
+            self.categories = (list(patch["categories"]) if overwrite
+                               else (self.categories or list(patch["categories"])))
         if patch.get("wait"):
             self.wait = True
         if patch.get("forceStop"):

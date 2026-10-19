@@ -1097,6 +1097,10 @@ def h_shortcut_save(ctx):
     sid = str(ctx.field("id", "") or ctx.field("name", ""))
     if op == "del":
         return hist_mod.del_shortcut(sid)
+    if op == "preset":
+        # 「把这条入口改成桌面图标方式 / 冷启动」—— 改的是**已存**的参数，
+        # 参数怎么拼交给 intent.apply_preset（和「启动」那一格同一个真相源）
+        return hist_mod.preset_shortcut(sid, str(ctx.field("preset", "") or ""))
     if op in ("edit", "rename", "update"):
         patch = {
             "name": ctx.field("name", None),

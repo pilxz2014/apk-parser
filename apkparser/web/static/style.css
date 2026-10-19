@@ -974,6 +974,14 @@ input.apk-path.filled { border-color: var(--ok); background: #f6fbf8; }
 /* 「我的入口」列表里可点的名称 */
 .fav-name { color: var(--brand-2); cursor: pointer; font-weight: 600; }
 .fav-name:hover { text-decoration: underline; }
+/* 「我的入口」参数列里的就地操作：把这条已存入口换成桌面图标方式。
+   参数是存下来的数据，改它必须看得见入口 —— 藏在"编辑参数→再收藏"里会因为重名走不通 */
+.fav-fix {
+  color: var(--brand-2); font-size: 11px; line-height: 1.4;
+  cursor: pointer; display: inline-block; margin-top: 2px;
+}
+.fav-fix:hover { text-decoration: underline; }
+.fav-dim { color: var(--dim); font-size: 11px; line-height: 1.4; margin-top: 2px; }
 
 /* 文件树的一个节点：包住「这一行 + 它的孩子们」 */
 .ft-node { min-width: 0; }

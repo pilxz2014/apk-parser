@@ -3234,6 +3234,10 @@ const launchOwnTab = async function (host, cap, q) {
   // 只带组件名是不够的：收藏的正是那些 extras / flags
   const seed = LAUNCH_SEED;
   LAUNCH_SEED = null;
+  // 正在改的是「我的入口」里的哪一条（空 = 新建）。
+  // 有它的时候"收藏"变成"覆盖保存"：否则改完参数只能新建，而新建会撞名被拒。
+  const editSid = (seed && seed._sid) || '';
+  const editName = (seed && seed._name) || '';
   const st = {
     kind: q.kind === 'service' ? 'service' : (seed && seed.kind === 'service' ? 'service' : 'activity'),
     target: (seed && seed.target) || q.component || '',
@@ -3451,6 +3455,9 @@ const launchOwnTab = async function (host, cap, q) {
   const runOut = el('div');
 
   host.appendChild(card('Intent 参数', '命令预览与实际执行走同一段代码，不可能不一致',
+    ...(editSid ? [notice('warn',
+      '正在修改「' + editName + '」这条入口的启动参数 —— 下面的「保存到「'
+      + editName + '」」会覆盖它，不会新建一条。')] : []),
     el('div', { class: 'field' }, el('label', {}, '目标组件 / 包名'), target,
       el('div', { style: { color: 'var(--dim)', fontSize: '11.5px', marginTop: '4px' } },
         '三种写法：com.foo/.ui.MainActivity（组件）· com.foo（自动查启动入口）· '
@@ -3502,9 +3509,12 @@ const launchOwnTab = async function (host, cap, q) {
       // 「配好一条 → 下次还想用」是启动器最真实的用法。以前只能靠"启动历史"
       // 翻出来再手抄一遍参数，等于没有。收藏存的是**整条 Intent**，不是裸组件名。
       el('button', {
-        class: 'btn', title: '把当前这条 Intent 存成「我的入口」，下次一点就走',
+        class: 'btn',
+        title: editSid
+          ? '把改好的参数覆盖保存到「' + editName + '」这条入口（不新建）'
+          : '把当前这条 Intent 存成「我的入口」，下次一点就走',
         onclick: () => saveFavorite(),
-      }, '☆ 收藏到我的入口'))));
+      }, editSid ? ('保存到「' + editName + '」') : '☆ 收藏到我的入口'))));
 
   /* 执行一次启动。失败时给两样东西：am 报错的中文解释，以及"换个启动方式再试"。
      为什么要后者：真机上"组件名没错、exported 也是 true，就是起不来"十次里有八次
@@ -3587,23 +3597,27 @@ const launchOwnTab = async function (host, cap, q) {
       if (resolved.intent.package) it.pkg = resolved.intent.package;
     }
     const comp = it.target || it.action || '';
-    // 默认名字取组件末段（`…ui.LoginActivity` → `LoginActivity`）——
-    // 直接回车就走，不用现编一个名字
-    const tail = String(comp).split('/').pop().split('.').pop() || '入口';
-    const name = await ask({
-      title: '收藏到我的入口',
-      message: '给它起个名字（下次在「我的入口」里直接点，也可以随时改名）',
-      value: tail, placeholder: tail,
-    });
-    if (!name) return;
-    try {
-      const r = await api('/api/launch/shortcut', {
-        method: 'POST',
-        body: { op: 'add', name, component: comp, intent: it, device: devParam() },
+    let body;
+    if (editSid) {
+      // 覆盖保存：名字、note 都不动，只换组件与整条参数
+      body = { op: 'edit', id: editSid, component: comp, intent: it, device: devParam() };
+    } else {
+      // 默认名字取组件末段（`…ui.LoginActivity` → `LoginActivity`）——
+      // 直接回车就走，不用现编一个名字
+      const tail = String(comp).split('/').pop().split('.').pop() || '入口';
+      const name = await ask({
+        title: '收藏到我的入口',
+        message: '给它起个名字（下次在「我的入口」里直接点，也可以随时改名）',
+        value: tail, placeholder: tail,
       });
-      if (r.ok) toast(r.detail || '已收藏', 'ok');
-      else toast(r.detail || '收藏失败', 'bad');
-    } catch (e) { toast('收藏失败：' + e.message, 'bad'); }
+      if (!name) return;
+      body = { op: 'add', name, component: comp, intent: it, device: devParam() };
+    }
+    try {
+      const r = await api('/api/launch/shortcut', { method: 'POST', body });
+      if (r.ok) toast(editSid ? ('已更新「' + (editName || '') + '」的参数') : (r.detail || '已收藏'), 'ok');
+      else toast(r.detail || (editSid ? '保存失败' : '收藏失败'), 'bad');
+    } catch (e) { toast('保存失败：' + e.message, 'bad'); }
   }
 
   host.appendChild(card('命令预览', null, previewBox));
@@ -3713,6 +3727,9 @@ VIEWS['device.launch.shortcut'] = async function (host, cap, q) {
   async function load() {
     out.innerHTML = ''; out.appendChild(spinner());
     let list = [];
+    // 「启动方式」的字段值来自后端（和「启动」那一格同一份 LAUNCH_PRESETS）——
+    // 前端只在**比较**时用它，绝不自己拼 -a MAIN -c LAUNCHER
+    let presets = [];
     try {
       const r = await api('/api/launch/shortcut');
       list = r.shortcuts || [];
@@ -3720,6 +3737,11 @@ VIEWS['device.launch.shortcut'] = async function (host, cap, q) {
       out.innerHTML = ''; out.appendChild(notice('bad', e.message));
       return;
     }
+    try { presets = (await api('/api/launch/catalog')).presets || []; } catch (e) { }
+    const lp = (presets.find((p) => p.id === 'launcher') || {}).patch || {};
+    const lpCat = (lp.categories || [])[0] || '';
+    const isLauncher = (it) => !!lp.action && it.action === lp.action
+      && (it.categories || []).indexOf(lpCat) >= 0;
     out.innerHTML = '';
     if (!list.length) {
       out.appendChild(card(null, null, emptyState('⭐',
@@ -3740,22 +3762,41 @@ VIEWS['device.launch.shortcut'] = async function (host, cap, q) {
           || ((s.intent && s.intent.action) ? '（Action）' + s.intent.action : ''),
       },
       {
-        key: '_d', label: '参数', width: '150px',
+        key: '_d', label: '参数', width: '168px',
         render: (s) => {
           const it = s.intent || {};
           const bits = [];
           if ((it.extras || []).length) bits.push('extras ' + it.extras.length);
           if ((it.flags || []).length) bits.push('flags ' + it.flags.length);
           if (it.data) bits.push('data');
+          // Action 只显示末段（只留 MAIN / VIEW）：这一列是给人扫的
+          if (it.action) bits.push(String(it.action).split('.').pop());
           if ((it.categories || []).length) bits.push('cat ' + it.categories.length);
           // -W / -S 不是"可有可无的调试开关"：带了 -S 的入口行为明显不同（先杀掉再起），
           // 列表里看不出来，用户会以为两个入口是一样的
           if (it.wait) bits.push('-W');
           if (it.forceStop) bits.push('-S');
           if (it.user) bits.push('user ' + it.user);
-          return bits.length
+          const box = el('div');
+          box.appendChild(bits.length
             ? el('span', { style: { color: 'var(--dim)', fontSize: '11.5px' } }, bits.join(' · '))
-            : el('span', { style: { color: 'var(--dim)' } }, '-');
+            : el('span', { style: { color: 'var(--dim)' } }, '-'));
+          // 存下来的参数是**可以改的**：老入口起不来，多半就是缺这一组。
+          // 点一下直接改这条入口存下来的 intent（op=preset 走后端 apply_preset），
+          // 不用"编辑参数 → 改 → 再收藏"（那样会因为重名存不回去）。
+          if (lp.action) {
+            box.appendChild(isLauncher(it)
+              ? el('div', { class: 'fav-dim' }, '桌面图标方式')
+              : el('span', {
+                class: 'fav-fix',
+                title: '把这条入口存下来的参数改成「桌面图标方式」那一组（就地改，不新建）',
+                onclick: (e) => {
+                  e.stopPropagation();
+                  post({ op: 'preset', id: s.id, preset: 'launcher' });
+                },
+              }, '改用桌面图标方式'));
+          }
+          return box;
         },
       },
       {
@@ -3777,11 +3818,14 @@ VIEWS['device.launch.shortcut'] = async function (host, cap, q) {
             },
           }, '改名'),
           el('button', {
-            class: 'btn sm', title: '把整条 Intent（含 extras/flags）载入「启动」那一格去改',
+            class: 'btn sm', title: '把整条 Intent（含 extras/flags/-W/-S）载入「启动」那一格去改，保存时覆盖这条入口',
             onclick: (e) => {
               e.stopPropagation();
-              LAUNCH_SEED = s.intent && Object.keys(s.intent).length
+              const base = (s.intent && Object.keys(s.intent).length)
                 ? s.intent : { target: s.component, kind: 'activity' };
+              // `_sid` / `_name`：告诉「启动」那一格"你在改一条已有入口"。
+              // 没有它就只能走"收藏"=新建，而新建会因为重名被拒 —— 等于参数改不回去。
+              LAUNCH_SEED = Object.assign({}, base, { _sid: s.id, _name: s.name });
               goTab('device.launch.start', 'start', {});
             },
           }, '编辑参数'),
@@ -3799,7 +3843,7 @@ VIEWS['device.launch.shortcut'] = async function (host, cap, q) {
           }, '删除')),
       },
     ];
-    out.appendChild(card(`共 ${list.length} 个`, '点名称=直接启动 · 改名只动名字 · 编辑参数会载入整条 Intent',
+    out.appendChild(card(`共 ${list.length} 个`, '点名称=直接启动 · 改名只动名字 · 编辑参数会载入整条 Intent（保存=覆盖这条）',
       dataTable(cols, list, { filter: true, filterPlaceholder: '按名称/包名过滤…', emptyText: '没有入口' })));
   }
 };

@@ -148,6 +148,72 @@ def add_shortcut(name: str, component: str, args: str = "",
     return {"ok": True, "detail": "已收藏「%s」" % name}
 
 
+def _find(items: List[dict], sid: str) -> Optional[dict]:
+    """按 id 找，找不到再按 name 找（老数据没有 id，书签传的是 name）。"""
+    sid = str(sid or "").strip()
+    if not sid:
+        return None
+    for i in items:
+        if i.get("id") == sid:
+            return i
+    for i in items:
+        if i.get("name") == sid:
+            return i
+    return None
+
+
+def preset_shortcut(sid: str, preset_id: str) -> dict:
+    """把一条**已存**入口的启动参数换成某个「启动方式」（就地改，不新建）。
+
+    为什么不给前端一个 `op:'edit'` 让它自己把 `-a MAIN -c LAUNCHER -W -S`
+    合进 `intent`：这串参数怎么拼只有 `Intent.apply_preset` 知道，前端再合一份
+    就是第二个真相源 —— 过一阵子预设改了，界面上"改成桌面图标方式"点出来的
+    和「启动」那一格发的会不是同一条命令。
+    """
+    from . import intent as intent_mod
+
+    patch = intent_mod.preset_patch(preset_id)
+    if patch is None:
+        return {"ok": False, "detail": "没有这种启动方式：%s" % (preset_id or "(空)")}
+    label = ""
+    for p in intent_mod.launch_presets():
+        if p["id"] == preset_id:
+            label = p["label"]
+            break
+
+    sid = str(sid or "").strip()
+    if not sid:
+        return {"ok": False, "detail": "缺少入口标识（id 或 name）"}
+    with _lock:
+        items = list_shortcuts()
+        hit = _find(items, sid)
+        if hit is None:
+            return {"ok": False, "detail": "找不到这个入口：%s" % sid}
+
+        base = dict(hit.get("intent") or {})
+        base.setdefault("kind", "activity")
+        if not base.get("target"):
+            base["target"] = hit.get("component") or ""
+        if base.get("kind") != "activity":
+            # 服务/广播没有"桌面图标那一下"，套上去只会发出一条 am 不认的命令
+            return {"ok": False, "detail": "服务 / 广播入口没有「%s」这种启动方式" % label}
+
+        it = intent_mod.Intent.from_dict(base).apply_preset(preset_id, overwrite=True)
+        hit["intent"] = {
+            "kind": it.kind, "target": it.target, "action": it.action,
+            "data": it.data, "mimeType": it.mime_type,
+            "categories": list(it.categories), "flags": list(it.flags),
+            "extras": [e.to_dict() for e in it.extras], "user": it.user,
+            "wait": bool(it.wait), "forceStop": bool(it.force_stop),
+            "package": it.pkg,
+        }
+        hit["component"] = hit.get("component") or it.target or ""
+        hit["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        _write("shortcuts.json", items)
+    return {"ok": True, "detail": "已把「%s」的启动参数改成「%s」" % (hit.get("name", sid), label),
+            "shortcut": hit}
+
+
 def edit_shortcut(sid: str, patch: dict) -> dict:
     """改正/重命名一个入口。
 
