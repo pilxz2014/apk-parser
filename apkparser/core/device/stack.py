@@ -36,13 +36,14 @@ _TASK_RE = re.compile(
 
 _HIST_RE = re.compile(
     r"^\s*\*\s*Hist\s*#(?P<idx>\d+):\s*ActivityRecord\{(?P<hash>[0-9a-f]+)"
-    r"\s+u(?P<user>\d+)\s+(?P<comp>\S+)\}\s*t(?P<task>\d+)"
-    r"(?:\s+d(?P<display>\d+))?")
+    r"\s+u(?P<user>\d+)\s+(?P<rest>\S.*)$")
 
 # `topResumedActivity=ActivityRecord{9d6af95 u0 com.x/.A} t3831 d0}`
 # `mFocusedApp=ActivityRecord{...}`、`mLastPausedActivity: ActivityRecord{...}`
+# 注意：**不能**要求组件后面紧跟 `}` —— 荣耀/Android 13+ 的写法是
+# `ActivityRecord{hash u0 pkg/.Cls t216}`（`t216` 在括号里），组件后面先是空格。
 _AR_RE = re.compile(
-    r"ActivityRecord\{(?P<hash>[0-9a-f]+)\s+u(?P<user>\d+)\s+(?P<comp>[^\s}]+)\}")
+    r"ActivityRecord\{(?P<hash>[0-9a-f]+)\s+u(?P<user>\d+)\s+(?P<comp>[^\s}]+)")
 
 _WINDOW_RE = re.compile(r"Window\{[0-9a-f]+\s+u\d+\s+(?P<comp>[^\s}]+)")
 
@@ -145,6 +146,30 @@ def _strip_uid(affinity: str) -> str:
     return a
 
 
+def _hist_tail(rest: str) -> Tuple[str, int, str]:
+    """`com.x/.A t216}` / `com.x/.A} t3831 d0` → (组件, taskId, displayId)。
+
+    各家把 `t<taskId>` / `d<displayId>` 放在 `}` 里面还是外面并不统一：
+
+    - Android 13+ / 荣耀 MagicOS：`ActivityRecord{hash u0 pkg/.Cls t216}`
+    - 老一些的写法：`ActivityRecord{hash u0 pkg/.Cls} t3831 d0`
+
+    只认一种的后果很实在 —— 荣耀那份 dumpsys 会解析成"8 个任务、0 个 Activity"。
+    """
+    toks = (rest or "").strip().split()
+    if not toks:
+        return "", 0, ""
+    comp = toks[0].rstrip("}")
+    task, disp = 0, ""
+    for tok in toks[1:]:
+        t = tok.rstrip("}")
+        if len(t) > 1 and t[0] == "t" and t[1:].isdigit():
+            task = int(t[1:])
+        elif len(t) > 1 and t[0] == "d" and t[1:].isdigit():
+            disp = t[1:]
+    return comp, task, disp
+
+
 def _mode_text(mode: str) -> str:
     return MODE_TEXT.get((mode or "").strip(), mode or "")
 
@@ -204,10 +229,24 @@ def parse(text: str) -> dict:
             rest = m.group("rest")
             kv = _kv(rest)
             aff = _strip_uid(kv.get("A", "") or kv.get("I", ""))
+            depth = len(m.group("ind")) // 2
+            if cur_display is None:          # 有些 ROM 不打印 Display 行
+                cur_display = {"id": 0, "tasks": []}
+                displays.append(cur_display)
+            # 嵌套 Task（分屏 / TaskFragment）：荣耀的 home 是 `Task#1` 里套
+            # `Task#2`，两个都打印、且都写 sz=1 —— 平铺出来就是"两个 home，
+            # 其中一个 0 个 Activity"。记下父子关系，界面按层画。
+            parent_id = 0
+            if depth > 1:
+                for prev in reversed(cur_display["tasks"]):
+                    if prev.get("depth", 0) < depth:
+                        parent_id = prev["id"]
+                        break
             task = {
                 "id": int(m.group("id")),
                 "hash": m.group("hash"),
-                "depth": len(m.group("ind")) // 2,
+                "depth": depth,
+                "parentId": parent_id,
                 "type": kv.get("type", ""),
                 "affinity": aff,
                 "affinityPackage": aff,
@@ -223,9 +262,6 @@ def parse(text: str) -> dict:
                 "activities": [],
                 "topComponent": "",
             }
-            if cur_display is None:          # 有些 ROM 不打印 Display 行
-                cur_display = {"id": 0, "tasks": []}
-                displays.append(cur_display)
             cur_display["tasks"].append(task)
             cur_task, cur_act = task, None
             continue
@@ -233,12 +269,16 @@ def parse(text: str) -> dict:
         # ---- Activity（Hist）----
         m = _HIST_RE.match(line)
         if m:
+            comp, task_id, display_id = _hist_tail(m.group("rest"))
+            if not comp:
+                continue
             act = {
                 "index": int(m.group("idx")),
                 "hash": m.group("hash"),
                 "userId": m.group("user"),
-                "taskId": int(m.group("task")),
-                "displayId": m.group("display") or "",
+                # taskId 在部分 ROM 的 Hist 行里会缺；缺了就跟当前 Task 走
+                "taskId": task_id or (cur_task["id"] if cur_task else 0),
+                "displayId": display_id,
                 "package": "", "className": "", "component": "", "fullClass": "",
                 "state": "", "stateText": "", "visible": False,
                 "visibleRequested": False,
@@ -248,9 +288,10 @@ def parse(text: str) -> dict:
                 "isTop": False, "isResumed": False, "isFocused": False,
                 "appLabel": "",
             }
-            act.update(split_component(m.group("comp")))
+            act.update(split_component(comp))
             if cur_task is None:             # 兜底：Hist 出现在 Task 之前
-                cur_task = {"id": act["taskId"], "hash": "", "depth": 0, "type": "",
+                cur_task = {"id": act["taskId"], "hash": "", "depth": 0,
+                            "parentId": 0, "type": "",
                             "affinity": "", "affinityPackage": "", "userId": "",
                             "visible": False, "visibleRequested": False, "mode": "",
                             "modeText": "", "translucent": False, "size": 0,
@@ -323,7 +364,10 @@ def parse(text: str) -> dict:
             if not t["activities"]:
                 continue
             n_act += len(t["activities"])
-            t["activities"][-1]["isTop"] = True
+            # dumpsys 的标题就写着 "activities from top to bottom"：
+            # 列表第 0 个才是**栈顶**（Hist #N 最大）。以前标的是 [-1]，
+            # 等于把栈底那条打上「栈顶」—— 荣耀这份一眼就看出来了。
+            t["activities"][0]["isTop"] = True
             for a in t["activities"]:
                 pk = a.get("package") or ""
                 if pk and pk not in packages:

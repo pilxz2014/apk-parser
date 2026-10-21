@@ -2544,7 +2544,16 @@ VIEWS['device.stack'] = async function (host, cap, q) {
 
   function displayNode(F, d, opened, visibleOnly, kwd) {
     const key = 'd-' + d.id;
-    const tasks = (d.tasks || []).map((t) => taskNode(F, t, d.id, opened, visibleOnly, kwd))
+    /* 嵌套 Task（分屏 / TaskFragment）只从根任务开始画，子任务挂在父任务下面。
+       荣耀的 home 是 `Task#1` 里套 `Task#2`、两个都写 sz=1 —— 平铺就会变成
+       "两个 home，其中一个 0 个 Activity"，看着像解析错了。 */
+    const byParent = {};
+    for (const t of (d.tasks || [])) {
+      const p = t.parentId || 0;
+      (byParent[p] = byParent[p] || []).push(t);
+    }
+    const tasks = (byParent[0] || [])
+      .map((t) => taskNode(F, t, d.id, opened, visibleOnly, kwd, byParent))
       .filter(Boolean);
     if (visibleOnly && tasks.length === 0 && (d.tasks || []).every((t) => !t.visible)) return null;
     if (kwd && tasks.length === 0) {
@@ -2578,18 +2587,23 @@ VIEWS['device.stack'] = async function (host, cap, q) {
       hits(a.component) || hits(a.package) || hits(a.className) || hits(a.fullClass));
   }
 
-  function taskNode(F, t, displayId, opened, visibleOnly, kwd) {
+  function taskNode(F, t, displayId, opened, visibleOnly, kwd, byParent) {
     if (visibleOnly && !t.visible) return null;
+    // 子任务先算出来：父任务可能自己一个 Activity 都没有（纯容器），
+    // 只按 acts 判"要不要画"会把子任务整棵丢掉
+    const childNodes = ((byParent && byParent[t.id]) || [])
+      .map((c) => taskNode(F, c, displayId, opened, visibleOnly, kwd, byParent))
+      .filter(Boolean);
     const taskMatch = taskMatches(t, kwd);
     const acts = filterActs(t.activities || [], kwd, taskMatch);
-    if (kwd && acts.length === 0 && !taskMatch) return null;
+    if (kwd && acts.length === 0 && !taskMatch && childNodes.length === 0) return null;
 
     const key = 't-' + t.id;
     const isOpen = opened.has(key);
     const actCount = (t.activities || []).length;
 
     const row = el('div', { class: 'stk-row stk-task-hd plain' },
-      caret(isOpen, actCount > 0, () => {
+      caret(isOpen, actCount > 0 || childNodes.length > 0, () => {
         opened.has(key) ? opened.delete(key) : opened.add(key);
         paint();
       }),
@@ -2598,6 +2612,7 @@ VIEWS['device.stack'] = async function (host, cap, q) {
       t.visible ? tag('可见', 'ok') : tag('不可见', 'plain'),
       tag(t.modeText || t.mode || '-', 'plain'),
       el('span', { class: 'stk-dim' }, 'Activity ' + actCount),
+      childNodes.length ? tag('子任务 ' + childNodes.length, 'plain') : null,
       t.type ? tag(t.type, 'plain') : null);
 
     const kids = el('div', { class: 'stk-kids' });
@@ -2606,6 +2621,7 @@ VIEWS['device.stack'] = async function (host, cap, q) {
         const an = actNode(F, a, displayId, opened);
         if (an) kids.appendChild(an);
       }
+      for (const c of childNodes) kids.appendChild(c);
     }
     return el('div', { class: 'stk-node' }, row, kids);
   }
