@@ -184,6 +184,21 @@ def install(project_root: Path = None, style: str = STYLE_CASCADE) -> Dict:
     if n_flat:
         steps.append("清理旧平铺菜单项：%d 个" % n_flat)
 
+    # 0.5) **脚本不在就一条都不写。**
+    #      每条菜单命令指向 <root>/scripts/<脚本>，脚本缺失时注册出来的每一项
+    #      都是死项：右键点了没反应，双击 .apk 直接弹"你要以何种方式打开此文件"
+    #      —— 而用户看到的是注册表里明明有条目（v0.2.13 发行包实测）。
+    #      打包版现在会带 scripts/，这里只是兜底：包不完整就明说，别留坏项。
+    absent = [s for _k, _l, s in all_items()
+              if not (root / paths.SCRIPTS_DIRNAME / s).is_file()]
+    if absent:
+        return {"ok": False, "steps": steps, "style": style,
+                "missingScripts": absent,
+                "error": "菜单脚本不在 %s 下（缺 %s），一条都没注册 —— "
+                         "注册出来全是指向空路径的死项。"
+                         "打包版请用新包（内含 scripts/ + apkcli.exe），源码版请检查 scripts/ 目录。"
+                         % (root / paths.SCRIPTS_DIRNAME, "、".join(absent))}
+
     if style == STYLE_FLAT:
         _install_flat(root, steps, missing)
     else:

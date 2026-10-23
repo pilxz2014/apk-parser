@@ -28,6 +28,104 @@ DIST = ROOT / "dist"
 README_SRC = ROOT / "docs" / "05-分发与使用说明.md"
 README_NAME = "使用说明.txt"
 
+# 发行包里的菜单薄壳：**不调 python / apktool.py**（绿色包里都没有），
+# 改成调同目录的 apkcli.exe（console 子系统，和托盘共用 _internal）。
+# 必须纯 ASCII —— cmd.exe 按 OEM 代码页读批处理，非 ASCII 会乱码。
+DIST_APK_CMD = """@echo off
+rem Packaged build: the exe ships a CLI mode, so no Python / apktool.py needed.
+rem Called by every apk-*.cmd wrapper. Keep this file ASCII-only.
+chcp 65001 >nul
+setlocal
+"%~dp0..\\apkcli.exe" %*
+exit /b %ERRORLEVEL%
+"""
+
+DIST_CONSOLE_CMD = """@echo off
+rem Right-click "Open console": start the tray host (single instance just opens the page).
+start "" "%~dp0..\\APKConsole.exe"
+"""
+
+# 两个入口、一份 _internal：托盘是 --windowed，CLI 必须是 console 子系统，
+# 否则右键脚本跑起来一行日志都看不见（print 写到 None）。
+# 分两次调用 PyInstaller 做不出"共享 _internal"，只能走 spec。
+SPEC_TEMPLATE = '''# -*- mode: python ; coding: utf-8 -*-
+# 由 package_win.py 生成，不要手改（下次打包会被覆盖）。
+from PyInstaller.utils.hooks import collect_all
+
+ROOT = r"@ROOT@"
+ICON = r"@ICON@"
+
+pystray_datas, pystray_binaries, pystray_hidden = collect_all("pystray")
+STATIC = [(ROOT + "/apkparser/web/static", "apkparser/web/static")]
+
+tray_a = Analysis(
+    [ROOT + "/APKConsole.py"],
+    pathex=[ROOT],
+    binaries=pystray_binaries,
+    datas=STATIC + pystray_datas,
+    hiddenimports=pystray_hidden,
+)
+cli_a = Analysis(
+    [ROOT + "/apkcli.py"],
+    pathex=[ROOT],
+    binaries=[],
+    datas=STATIC,
+    hiddenimports=[],
+)
+
+tray_pyz = PYZ(tray_a.pure)
+cli_pyz = PYZ(cli_a.pure)
+
+tray_exe = EXE(
+    tray_pyz, tray_a.scripts, [],
+    exclude_binaries=True, name="APKConsole", console=False, icon=ICON,
+    debug=False, strip=False, upx=False, bootloader_ignore_signals=False,
+)
+cli_exe = EXE(
+    cli_pyz, cli_a.scripts, [],
+    exclude_binaries=True, name="apkcli", console=True, icon=ICON,
+    debug=False, strip=False, upx=False, bootloader_ignore_signals=False,
+)
+
+coll = COLLECT(
+    tray_exe, tray_a.binaries, tray_a.datas,
+    cli_exe, cli_a.binaries, cli_a.datas,
+    strip=False, upx=False, name="APKConsole",
+)
+'''
+
+
+def write_spec(icon: str) -> Path:
+    spec = ROOT / (APP + ".spec")
+    text = (SPEC_TEMPLATE
+            .replace("@ROOT@", str(ROOT))
+            .replace("@ICON@", icon or ""))
+    spec.write_text(text, encoding="utf-8", newline="\n")
+    return spec
+
+
+def copy_scripts(dest_dir: Path) -> bool:
+    """把右键菜单要执行的脚本放进发行目录（exe 同级 scripts/）。
+
+    这是 v0.2.14 修的真问题：以前打包不带 scripts/，主控台在发行版里
+    照样能"安装菜单"，注册表项全指向不存在的脚本 —— 双击 .apk 直接弹
+    "你要以何种方式打开此文件"。脚本进包 + apk.cmd 改调 exe 才闭环。
+    """
+    src = ROOT / "scripts"
+    dst = dest_dir / "scripts"
+    names = sorted(p.name for p in src.glob("*.cmd"))
+    if not names:
+        print("[X] 源码里没有 scripts/*.cmd，菜单注册出来会是死项")
+        return False
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        shutil.copy2(src / name, dst / name)
+    # 覆盖成打包版：调 exe 而不是 python
+    (dst / "apk.cmd").write_text(DIST_APK_CMD, encoding="ascii", newline="\r\n")
+    (dst / "apk-console.cmd").write_text(DIST_CONSOLE_CMD, encoding="ascii", newline="\r\n")
+    print("[..] 已放入菜单脚本：%s（%d 个，已改为调 apkcli.exe）" % (dst, len(names)))
+    return True
+
 
 def copy_readme(dest_dir: Path) -> bool:
     """把说明书放进发行目录（UTF-8 **带 BOM** —— Windows 记事本不猜编码，
@@ -104,26 +202,27 @@ def stop_running() -> None:
 
 
 def build() -> int:
-    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-           "--windowed", "--onedir", "--name", APP,
-           "--add-data", os.path.join("apkparser", "web", "static")
-                         + ";" + os.path.join("apkparser", "web", "static"),
-           "--collect-all", "pystray",
-           str(ROOT / "APKConsole.py")]
     ico = make_icon()
-    if ico:
-        cmd += ["--icon", ico]
-    print("[..] PyInstaller 构建中…")
-    r = subprocess.run(cmd, cwd=str(ROOT))
+    spec = write_spec(ico)
+    print("[..] PyInstaller 构建中（APKConsole.exe + apkcli.exe，共享 _internal）…")
+    r = subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+                        str(spec)], cwd=str(ROOT))
     return r.returncode
 
 
 def smoke() -> bool:
-    """静默拉起 exe → 探活 → 单例（再起一个应即退）→ 停掉。"""
+    """静默拉起 exe → 探活 → 单例（再起一个应即退）→ 停掉；顺带验 CLI。"""
     exe = DIST / APP / (APP + ".exe")
     if not exe.is_file():
         print("[X] 找不到产物：%s" % exe)
         return False
+    cli = DIST / APP / "apkcli.exe"
+    cli_ok = False
+    if cli.is_file():
+        r = subprocess.run([str(cli), "--version"], capture_output=True, text=True,
+                           errors="replace", timeout=60)
+        cli_ok = r.returncode == 0 and "apktool" in (r.stdout or "")
+    print("[..] CLI 入口 apkcli.exe：%s" % ("OK" if cli_ok else "FAIL"))
     env = dict(os.environ, APKCONSOLE_NO_OPEN="1")
     port = 5177                              # 避开常驻的 5170
     p1 = subprocess.Popen([str(exe), "--port", str(port)], env=env,
@@ -152,7 +251,7 @@ def smoke() -> bool:
     # 收尾：整树 kill 托盘进程（GUI 循环没法从外部优雅退出）
     subprocess.run(["taskkill", "/PID", str(p1.pid), "/T", "/F"],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return ok and singleton
+    return ok and singleton and cli_ok
 
 
 def main() -> int:
@@ -170,6 +269,8 @@ def main() -> int:
         smoke()
     if not copy_readme(exe.parent):
         return fail("说明书没能放进发行目录")
+    if not copy_scripts(exe.parent):
+        return fail("菜单脚本没能放进发行目录（右键菜单注册出来会是死项）")
     zip_base = str(DIST / (APP + "-win"))
     shutil.make_archive(zip_base, "zip", root_dir=str(DIST), base_dir=APP)
     print()
