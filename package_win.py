@@ -45,6 +45,28 @@ rem Right-click "Open console": start the tray host (single instance just opens 
 start "" "%~dp0..\\APKConsole.exe"
 """
 
+# 根目录一键启停（exe 同级）。主控台的「系统」页会核对这 4 个文件，缺了就标红。
+# 打包版没有 python / apktool.py，启停全部改走 apkcli.exe / 托盘 exe：
+#   启动 = 先请旧实例退出（web stop 对所有本工具实例生效），再拉起托盘；
+#   停止 = apkcli.exe web stop（health 探活 5170-5179，发 /api/sys/shutdown）。
+# chcp 65001：apkcli.exe 输出 UTF-8（✔ / 中文），GBK 代码页的窗口会乱码。
+# 必须纯 ASCII。
+DIST_START_CMD = """@echo off
+rem Packaged build: stop any running instance first, then start the tray host.
+rem (Same restart semantics as the source-tree start.bat. Keep this ASCII-only.)
+chcp 65001 >nul
+"%~dp0apkcli.exe" web stop >nul 2>nul
+start "" "%~dp0APKConsole.exe"
+"""
+
+DIST_STOP_CMD = """@echo off
+rem Packaged build: stop the console (all instances of this tool).
+chcp 65001 >nul
+"%~dp0apkcli.exe" web stop
+echo.
+pause
+"""
+
 # 两个入口、一份 _internal：托盘是 --windowed，CLI 必须是 console 子系统，
 # 否则右键脚本跑起来一行日志都看不见（print 写到 None）。
 # 分两次调用 PyInstaller 做不出"共享 _internal"，只能走 spec。
@@ -123,7 +145,13 @@ def copy_scripts(dest_dir: Path) -> bool:
     # 覆盖成打包版：调 exe 而不是 python
     (dst / "apk.cmd").write_text(DIST_APK_CMD, encoding="ascii", newline="\r\n")
     (dst / "apk-console.cmd").write_text(DIST_CONSOLE_CMD, encoding="ascii", newline="\r\n")
+    # 根目录一键启停（主控台「系统」页会核对这 4 个）
+    (dest_dir / "start.bat").write_text(DIST_START_CMD, encoding="ascii", newline="\r\n")
+    (dest_dir / "run-web.cmd").write_text(DIST_START_CMD, encoding="ascii", newline="\r\n")
+    (dest_dir / "stop.bat").write_text(DIST_STOP_CMD, encoding="ascii", newline="\r\n")
+    (dest_dir / "stop-web.cmd").write_text(DIST_STOP_CMD, encoding="ascii", newline="\r\n")
     print("[..] 已放入菜单脚本：%s（%d 个，已改为调 apkcli.exe）" % (dst, len(names)))
+    print("[..] 已放入一键启停：start.bat / stop.bat / run-web.cmd / stop-web.cmd（exe 同级）")
     return True
 
 
