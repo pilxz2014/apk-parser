@@ -49,6 +49,12 @@ _dirty = False
 _stamp = None                  # 上次读文件时的 (mtime_ns, size)
 _last_check = 0.0              # 上次检查文件是否被外部改过的时间
 
+# 取不到名字的包：**只记在内存里**，别落盘。列表打开时自动补齐，失败一次
+# 就在 10 分钟内不再重复试 —— 否则每次刷新列表都要为同一批"读不到的包"
+# 白等一遍 adb（单包 0.4~1s，几十个就是十几秒）。
+_failed: Dict[str, float] = {}
+FAIL_TTL = 600.0
+
 
 # ---------------------------------------------------------------- 缓存读写
 
@@ -173,6 +179,58 @@ def stats() -> dict:
         return {"cached": len(c), "file": str(cache_file())}
 
 
+# ---------------------------------------------------------------- 失败负缓存
+
+def mark_failed(package: str, version_code: int = 0) -> None:
+    """记下"这个包刚才取不到名字"（内存，TTL 见 `FAIL_TTL`）。"""
+    if not package:
+        return
+    with _lock:
+        _failed[key_of(package, version_code)] = time.time()
+
+
+def failed_recently(package: str, version_code: int = 0) -> bool:
+    key = key_of(package, version_code)
+    with _lock:
+        ts = _failed.get(key)
+        if ts is None:
+            return False
+        if time.time() - ts >= FAIL_TTL:
+            _failed.pop(key, None)
+            return False
+        return True
+
+
+def forget_failed(package: str = "") -> int:
+    """装/卸/升级之后调：那次失败不该继续压着新版本的包。"""
+    with _lock:
+        if not package:
+            n = len(_failed)
+            _failed.clear()
+            return n
+        hit = [k for k in list(_failed) if k.startswith(package + "|")]
+        for k in hit:
+            _failed.pop(k, None)
+        return len(hit)
+
+
+def candidates(packages: List[dict]) -> List[dict]:
+    """从一批包里去挑"值得再试一次"的（列表页自动补齐用）。
+
+    只排除**刚才失败过**的；缓存命中与否交给 SyncJob 自己跳（那边判得更准，
+    而且能顺便把 skipped 计数报给界面）。
+    """
+    out = []
+    for p in packages or []:
+        pkg = str((p or {}).get("package") or "")
+        if not pkg:
+            continue
+        if failed_recently(pkg, int((p or {}).get("versionCode") or 0)):
+            continue
+        out.append(p)
+    return out
+
+
 def clear() -> int:
     global _cache, _dirty, _stamp
     with _lock:
@@ -221,10 +279,12 @@ class SyncJob:
     """一次"补齐应用名"的进度状态（同一时刻只允许一个）。"""
 
     def __init__(self, packages: List[dict], device: str = "",
-                 workers: int = DEFAULT_WORKERS):
+                 workers: int = DEFAULT_WORKERS, skip_failed: bool = False):
         self.packages = packages
         self.device = device
         self.workers = max(1, min(16, int(workers)))
+        # 列表页自动补齐时别再为"刚失败过"的包白跑一遍；手动补齐永远重试
+        self.skip_failed = bool(skip_failed)
         self.total = len(packages)
         self.done = 0
         # 叫 succeeded 不叫 ok：接口信封已经用 ok 表示"这次请求本身成功了"，
@@ -275,6 +335,10 @@ class SyncJob:
                 self.skipped += 1
                 self.done += 1
                 continue
+            if self.skip_failed and failed_recently(pkg, vc):
+                self.skipped += 1
+                self.done += 1
+                continue
             todo.append((pkg, vc, str(p["apkPath"])))
 
         self.total = len(todo) + self.skipped
@@ -293,6 +357,7 @@ class SyncJob:
             if res.get("ok"):
                 put(pkg, vc, res["label"], source="device")
                 return True
+            mark_failed(pkg, vc)
             return {"package": pkg, "error": res.get("error") or "取不到"}
 
         try:
@@ -341,13 +406,14 @@ def current_job() -> Optional[SyncJob]:
 
 
 def start_sync(packages: List[dict], device: str = "",
-               workers: int = DEFAULT_WORKERS) -> SyncJob:
+               workers: int = DEFAULT_WORKERS, skip_failed: bool = False) -> SyncJob:
     """启动后台补齐（已在跑就返回那一个，不重复起）。"""
     global _job
     with _job_lock:
         if _job is not None and _job.running:
             return _job
-        _job = SyncJob(packages, device=device, workers=workers)
+        _job = SyncJob(packages, device=device, workers=workers,
+                       skip_failed=skip_failed)
         _job.start()
         return _job
 

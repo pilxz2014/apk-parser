@@ -2725,6 +2725,10 @@ VIEWS['device.apps'] = async function (host, cap, q) {
   const sys = el('input', { type: 'checkbox' });
   const out = el('div');
   let timer = null;
+  // 上次"补齐成功"的计数：用来判断"任务已经跑完了、但这批数据还是旧的"，
+  // 需要再重绘一次把名字补上。不记住它就会反复 reload（名字永远补不上的包）。
+  let lastSucceeded = null;
+  let bar = null;                 // 进度条容器（paint 里重建，tick 里写）
 
   host.appendChild(card('应用列表', '应用名是解析 APK 拿到的（服务端只读两个条目，不复制整包）',
     el('div', { class: 'row' },
@@ -2749,9 +2753,16 @@ VIEWS['device.apps'] = async function (host, cap, q) {
       out.innerHTML = '';
       if (!r.ok) { out.appendChild(notice('bad', r.error || '读取失败')); return; }
       paint(r);
-      // 进度可能已经在跑（比如从别的页面起的），接上
-      const st = await api('/api/apps/labels/state').catch(() => null);
-      if (st && st.running) startPolling();
+      // 进度可能已经在跑（后端在列表加载时就会自动起一次补齐），接上它
+      const st = r.syncState || await api('/api/apps/labels/state').catch(() => null);
+      if (st && st.running) { startPolling(!!r.autoSync); return; }
+      // 任务已经跑完、名字也补进去了，但这次的列表是旧数据 → 自动再读一次。
+      // 只在"成功数变了"时做一次，不会来回循环。
+      if (st && st.everRan && r.missing > 0 && (st.succeeded || 0) > 0
+          && st.succeeded !== lastSucceeded) {
+        lastSucceeded = st.succeeded;
+        load(false);
+      }
     } catch (e) { out.innerHTML = ''; out.appendChild(notice('bad', e.message)); }
   }
 
@@ -2759,8 +2770,12 @@ VIEWS['device.apps'] = async function (host, cap, q) {
     const apps = r.apps || [];
     const named = apps.filter((a) => a.label).length;
     const missing = apps.length - named;
+    const running = !!(r.syncState && r.syncState.running);
 
-    const bar = el('div', { class: 'lbl-progress', style: { display: 'none' } });
+    // 每次重绘换一个新的进度条容器，但变量本身留在视图作用域里 ——
+    // tick 读的是这个变量。写成 `const bar = …` 会有一半几率失效：
+    // 任务跑完重绘一次之后，定时器还在往已经脱管的旧节点里写。
+    bar = el('div', { class: 'lbl-progress', style: { display: 'none' } });
     const body = [];
 
     if (missing > 0) {
@@ -2769,7 +2784,8 @@ VIEWS['device.apps'] = async function (host, cap, q) {
           class: 'btn', onclick: () => startSync(apps),
         }, '补齐应用名（' + missing + ' 个）'),
         el('span', { style: { fontSize: '11.5px', color: 'var(--dim)' } },
-          '从设备上的 APK 里读应用名：只取 Manifest + 资源表两个条目，约 1 秒/个，不复制整包；结果会缓存'),
+          (running ? '正在后台补齐缺失的应用名' : '缺失的应用名已自动补齐')
+          + '：从设备上的 APK 里读，只取 Manifest + 资源表两个条目，约 1 秒/个，不复制整包；结果会缓存，升级后才重取'),
         bar));
     }
 
@@ -2798,44 +2814,47 @@ VIEWS['device.apps'] = async function (host, cap, q) {
     out.appendChild(card('共 ' + apps.length + ' 个',
       (r.cached ? '来自缓存' : '刚刚读取') + ' · 应用名 ' + named + '/' + apps.length,
       ...body));
+  }
 
-    function startSync(list) {
-      const pkgs = list.map((a) => ({
-        package: a.package, versionCode: a.versionCode || 0, apkPath: a.apkPath || '',
-      }));
-      api('/api/apps/labels/sync', {
-        method: 'POST', body: { device: devParam(), packages: pkgs },
-      }).then(() => startPolling()).catch((e) => toast(e.message, 'bad'));
-    }
+  function startSync(list) {
+    const pkgs = list.map((a) => ({
+      package: a.package, versionCode: a.versionCode || 0, apkPath: a.apkPath || '',
+    }));
+    api('/api/apps/labels/sync', {
+      method: 'POST', body: { device: devParam(), packages: pkgs },
+    }).then(() => startPolling(false)).catch((e) => toast(e.message, 'bad'));
+  }
 
-    function startPolling() {
-      if (timer) return;
-      bar.style.display = '';
-      const tick = async () => {
-        let st = null;
-        try { st = await api('/api/apps/labels/state'); } catch (_) { return; }
-        if (!st) return;
-        const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
-        bar.innerHTML = '';
-        bar.appendChild(el('div', { class: 'lb-line' },
-          el('div', { class: 'lb-bar' }, el('div', { class: 'lb-fill', style: { width: pct + '%' } })),
-          el('span', { class: 'lb-txt' },
-            st.done + '/' + st.total + ' · 成功 ' + (st.succeeded || 0) + ' · 失败 ' + (st.failed || 0)
-            + (st.running && st.current ? ' · ' + st.current : ''))));
-        if (st.running) {
-          bar.appendChild(el('button', {
-            class: 'btn sm', onclick: () => api('/api/apps/labels/stop', { method: 'POST' }).catch(() => {}),
-          }, '停止'));
-        } else {
-          clearInterval(timer); timer = null;
-          toast('应用名补齐结束：成功 ' + (st.succeeded || 0) + ' / 失败 ' + (st.failed || 0),
-            st.failed ? 'warn' : 'ok');
-          load(false);
-        }
-      };
-      timer = setInterval(tick, 800);
-      tick();
-    }
+  function startPolling(auto) {
+    if (timer) return;
+    if (!bar) bar = el('div', { class: 'lbl-progress' });
+    bar.style.display = '';
+    const tick = async () => {
+      let st = null;
+      try { st = await api('/api/apps/labels/state'); } catch (_) { return; }
+      if (!st) return;
+      const pct = st.total ? Math.round((st.done / st.total) * 100) : 0;
+      bar.innerHTML = '';
+      bar.appendChild(el('div', { class: 'lb-line' },
+        el('div', { class: 'lb-bar' }, el('div', { class: 'lb-fill', style: { width: pct + '%' } })),
+        el('span', { class: 'lb-txt' },
+          (auto ? '自动补齐 ' : '') + st.done + '/' + st.total
+          + ' · 成功 ' + (st.succeeded || 0) + ' · 失败 ' + (st.failed || 0)
+          + (st.running && st.current ? ' · ' + st.current : ''))));
+      if (st.running) {
+        bar.appendChild(el('button', {
+          class: 'btn sm', onclick: () => api('/api/apps/labels/stop', { method: 'POST' }).catch(() => {}),
+        }, '停止'));
+      } else {
+        clearInterval(timer); timer = null;
+        lastSucceeded = st.succeeded || 0;    // 这次的成果已经认领，别再触发额外重读
+        toast('应用名补齐结束：成功 ' + (st.succeeded || 0) + ' / 失败 ' + (st.failed || 0),
+          st.failed ? 'warn' : 'ok');
+        load(false);
+      }
+    };
+    timer = setInterval(tick, 800);
+    tick();
   }
 
   load();

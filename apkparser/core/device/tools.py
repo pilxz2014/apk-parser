@@ -47,9 +47,12 @@ def uninstall(package: str, device: str = "", keep_data: bool = False) -> dict:
     if res["ok"]:
         try:
             from . import signature as sig_mod
+            from . import labels as labels_mod
             from ..launch import components as comp_mod
             sig_mod.invalidate(package)
             comp_mod.forget_exported(package)
+            # 卸载/重装之后，"这个包取不到名字"的结论也该作废
+            labels_mod.forget_failed(package)
         except Exception:
             pass
     return res

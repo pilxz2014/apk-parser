@@ -220,6 +220,11 @@ def app_detail(package: str, device: str = "") -> dict:
             info["label"] = apk_info.app_label
             info["icon"] = apk_info.icon_data_uri
             info["apkFileName"] = apk_info.file_name
+            # 顺手写回应用名缓存：详情页看一次，应用列表就不该再是（未知）
+            if apk_info.app_label:
+                from . import labels as labels_mod
+                labels_mod.put(package, int(info.get("versionCode") or 0),
+                               apk_info.app_label, source="detail")
         except Exception:
             pass
 

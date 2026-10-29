@@ -275,6 +275,39 @@ def h_device_stack(ctx):
 _APP_CACHE = {"ts": 0.0, "serial": "", "system": False, "data": []}
 _APP_TTL = 20.0
 
+# 自动补齐应用名的节流：同一台设备 + 同一批"缺名字的包"短时间内只起一次任务。
+# 不做这层的话，用户来回切页面/改过滤词就会反复触发 —— 每次都白跑一遍 adb
+# （缓存命中的会跳过，但启动时的 `pm list` 是省不掉的）。
+_AUTO_LABEL = {"key": "", "ts": 0.0}
+_AUTO_LABEL_GAP = 60.0
+
+
+def _maybe_auto_labels(serial: str, missing: list) -> bool:
+    """列表里有没名字的包 → 后台起一次补齐。返回是否真的起了。
+
+    为什么要自动：应用名只能靠解析设备上的 APK 拿（`pm list packages` 不给），
+    以前只有点了「补齐应用名」才去取，于是**从没打开过的应用一直显示（未知）**，
+    直到用户碰巧去看了它的签名/详情（那条路会把 base.apk 缓存到本地）才补上。
+    """
+    if not missing:
+        return False
+    job = labels_mod.current_job()
+    if job is not None and job.running:
+        return False
+    todo = labels_mod.candidates([
+        {"package": a.package, "versionCode": a.version_code, "apkPath": a.apk_path}
+        for a in missing
+    ])
+    if not todo:
+        return False                       # 都刚失败过，别白跑
+    key = "%s|%s" % (serial, ",".join(sorted(p["package"] for p in todo)))
+    now = time.time()
+    if _AUTO_LABEL["key"] == key and now - _AUTO_LABEL["ts"] < _AUTO_LABEL_GAP:
+        return False
+    _AUTO_LABEL.update({"key": key, "ts": now})
+    labels_mod.start_sync(todo, device=serial, skip_failed=True)
+    return True
+
 
 def _cached_apps(serial: str, include_system: bool, refresh: bool = False):
     now = time.time()
@@ -302,6 +335,9 @@ def h_apps(ctx):
     # 缓存里存的是 AppInfo 对象：应用名缓存后来才补齐的话，
     # 这里要再查一次表（纯内存字典，"补齐"跑完刷新列表就能看到名字）
     labels_mod.enrich(items)
+    # 还缺名字的 → 后台自动补（不阻塞这次响应：主体先出、名字后到）
+    missing = [a for a in items if not a.label]
+    auto = _maybe_auto_labels(serial, missing)
     if kw:
         items = [a for a in items if a.matches(kw)]
     named = sum(1 for a in items if a.label)
@@ -311,6 +347,9 @@ def h_apps(ctx):
         "cached": cached,
         "count": len(items),
         "labeled": named,
+        "missing": len(missing),
+        "autoSync": auto,
+        "syncState": labels_mod.sync_state(),
         "labelsCached": labels_mod.stats().get("cached", 0),
         "apps": [a.to_dict() for a in items],
     }

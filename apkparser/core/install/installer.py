@@ -115,9 +115,12 @@ def install_one(apk, serial: str, reinstall: bool = True, downgrade: bool = Fals
         # 装成功之后，之前缓存的签名/组件解析都该失效
         try:
             from ..device import signature as sig_mod
+            from ..device import labels as labels_mod
             from ..launch import components as comp_mod
             sig_mod.invalidate(pkg_of(result))
             comp_mod.forget_exported(pkg_of(result))
+            # 升级换了 versionCode，旧版本"取不到名字"的负缓存不能压着新版本
+            labels_mod.forget_failed(pkg_of(result))
         except Exception:
             pass
 
