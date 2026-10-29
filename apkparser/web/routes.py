@@ -348,7 +348,10 @@ def h_apps(ctx):
         "cached": cached,
         "count": len(items),
         "labeled": named,
-        "missing": len(missing),
+        # missing 是**这一屏**还缺几个（前端据此决定要不要重绘）；missingAll 是全量。
+        # 分开是因为过滤时"看得见的一个都不缺"就不该再触发重读。
+        "missing": len(items) - named,
+        "missingAll": len(missing),
         "autoSync": auto,
         "syncState": labels_mod.sync_state(),
         "labelsCached": labels_mod.stats().get("cached", 0),
