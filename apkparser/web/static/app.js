@@ -547,7 +547,12 @@ function loadPkgList(all, force) {
   PKG_LIST.pending = (async () => {
     try {
       const r = await api('/api/apps', {
-        params: { device: devParam(), system: all ? '1' : '', refresh: force ? '1' : '' },
+        // autolabel=0：这里只是给下拉框凑候选，别为 170 多个系统应用
+        // 触发一轮后台"补齐应用名"（那是应用列表页的事，用户真要看名字时会自己补）
+        params: {
+          device: devParam(), system: all ? '1' : '', refresh: force ? '1' : '',
+          autolabel: '0',
+        },
       });
       PKG_LIST.items = r.apps || [];
     } catch (e) {

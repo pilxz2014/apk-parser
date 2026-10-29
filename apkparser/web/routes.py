@@ -335,9 +335,10 @@ def h_apps(ctx):
     # 缓存里存的是 AppInfo 对象：应用名缓存后来才补齐的话，
     # 这里要再查一次表（纯内存字典，"补齐"跑完刷新列表就能看到名字）
     labels_mod.enrich(items)
-    # 还缺名字的 → 后台自动补（不阻塞这次响应：主体先出、名字后到）
+    # 还缺名字的 → 后台自动补（不阻塞这次响应：主体先出、名字后到）。
+    # `autolabel=0` 的调用方（包名/应用下拉）只是凑候选，别替它扫全量系统包。
     missing = [a for a in items if not a.label]
-    auto = _maybe_auto_labels(serial, missing)
+    auto = _maybe_auto_labels(serial, missing) if ctx.qb("autolabel", True) else False
     if kw:
         items = [a for a in items if a.matches(kw)]
     named = sum(1 for a in items if a.label)
