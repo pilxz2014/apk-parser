@@ -6,7 +6,8 @@
 但本工具的服务端就在同一台机器上 —— 拿这三个特征去常见目录里搜一遍，
 命中率足够高（体积按字节精确比对，几乎不会错判）。
 
-搜索是**有边界**的：只扫 `paths.known_dirs()` + 配置追加的目录，
+搜索是**有边界**的：只扫 `paths.known_dirs()` + 自动识别的开发目录
+（各盘符/用户主目录下的 workspace、projects 等）+ 配置追加的目录，
 限制深度、条目数与耗时，绝不"全盘扫描"。
 """
 
@@ -27,17 +28,71 @@ SKIP_NAMES = {
     "ProgramData", "AppData", "WSL", "Temp", "temp", "tmp",
     # 本工具自己的产物目录，扫了纯浪费时间
     "cache", "output", "logs",
+    # 聊天/网盘客户端的数据目录：动辄几十万个文件，绝不可能放 APK
+    # （实测 xwechat_files 一家 24 万条目，能把整个搜索预算吃光）
+    "xwechat_files", "WeChat Files", "Tencent Files", "WPSDrive", "QQ",
 }
 
 APK_SUFFIXES = (".apk", ".apks", ".xapk", ".aab")
 
-MAX_DEPTH = 5           # 相对各搜根的最大深度
-MAX_ENTRIES = 60000     # 最多看多少个目录项（防呆）
-DEFAULT_BUDGET = 4.0    # 秒
+# 开发目录的常见名字（相对盘符根 / 用户主目录）。拖进来的 APK 十有八九
+# 是刚构建出来的 —— `D:\workspace\...\build\outputs\apk\...` 这种路径，
+# 传统「下载/桌面」搜索根永远够不着，必须把开发目录也纳入。
+DEV_DIR_NAMES = (
+    "workspace", "work", "works", "projects", "project",
+    "code", "repos", "AndroidStudioProjects", "IdeaProjects",
+)
+
+# Gradle 输出目录的"形状"：名字叫 build 的目录里**只有 outputs 会有 APK**，
+# intermediates / tmp / 三个子树是天文数字的中间产物，走进去必超预算。
+# 按这一层层的关卡剪枝，开发目录才能在预算内搜到底。
+_BUILD_GATE = {
+    "build": {"outputs"},
+    "outputs": {"apk", "bundle", "binaries", "logs", "mapping"},
+}
+
+MAX_DEPTH = 10          # 相对各搜根的最大深度（开发树里 apk 深埋 7~8 层）
+MAX_ENTRIES = 250000    # 最多看多少个目录项（防呆）
+DEFAULT_BUDGET = 8.0    # 秒（全局总预算）
+PER_ROOT_BUDGET = 3.0   # 秒（单个搜索根的预算 —— 一家超肥不再拖垮后面的根）
+
+
+def _dev_roots() -> List[Path]:
+    """自动识别的开发目录：各盘符根 + 用户主目录下的常见命名。
+
+    只做**存在性检查**（一串 is_dir，毫秒级），不递归 —— 递归是 walk 的事。
+    顺序：用户主目录下的优先（跨平台都能命中），然后按盘符顺序。
+    """
+    out: List[Path] = []
+    seen = set()
+
+    def add(p):
+        key = str(p).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(p)
+
+    home = Path.home()
+    for n in DEV_DIR_NAMES:
+        p = home / n
+        if p.is_dir():
+            add(p)
+
+    if os.name == "nt":
+        for code in range(ord("C"), ord("Z") + 1):
+            drv = "%c:\\" % code
+            if not os.path.isdir(drv):
+                continue
+            for n in DEV_DIR_NAMES:
+                p = Path(drv + n)
+                if p.is_dir():
+                    add(p)
+    return out
 
 
 def search_roots(extra: Optional[List[str]] = None) -> List[Path]:
-    """搜索起点：常见用户目录 + 配置追加目录。"""
+    """搜索起点：常见用户目录 + 自动识别的开发目录 + 配置追加目录。"""
     out: List[Path] = []
     seen = set()
 
@@ -53,6 +108,8 @@ def search_roots(extra: Optional[List[str]] = None) -> List[Path]:
         out.append(p)
 
     for p in paths.known_dirs():
+        add(p)
+    for p in _dev_roots():
         add(p)
     for p in (extra or []):
         add(p)
@@ -74,6 +131,8 @@ def roots_info(extra: Optional[List[str]] = None) -> List[dict]:
             "defaultPath": f.get("defaultPath", ""),
         })
     out.append({"path": str(paths.project_root()), "title": "工具目录", "redirected": False})
+    for p in _dev_roots():
+        out.append({"path": str(p), "title": "开发目录（自动识别）", "redirected": False})
     for p in (extra or []):
         try:
             p = Path(os.path.expandvars(os.path.expanduser(str(p))))
@@ -121,18 +180,31 @@ def locate(name: str, size: int = 0, mtime: int = 0,
     truncated = False
 
     for root in use_roots:
-        if time.time() - t0 > budget:
+        now = time.time()
+        if now - t0 > budget:
             truncated = True
             break
+        # 单根限额：一家超肥（几十万文件的客户端数据目录）不许吃光全局预算，
+        # 后面的根（比如开发目录）还要活命
+        root_deadline = min(t0 + budget, now + PER_ROOT_BUDGET)
+        root_truncated = False
         base_depth = len(root.parts)
         for dirpath, dirnames, filenames in os.walk(str(root), onerror=lambda _e: None):
-            if time.time() - t0 > budget:
+            now = time.time()
+            if now - t0 > budget:
                 truncated = True
                 break
-            # 剪枝：跳过系统/缓存目录，控制深度
+            if now > root_deadline:
+                root_truncated = True
+                break
+            # 剪枝：跳过系统/缓存目录；Gradle 的 build 树按形状放行（只走 outputs 一脉）
             dirnames[:] = [d for d in dirnames
                            if d not in SKIP_NAMES and not d.startswith(".")
                            and not d.startswith("$")]
+            gate = _BUILD_GATE.get(os.path.basename(dirpath.rstrip("\\/")).lower()
+                                   if dirpath else "")
+            if gate is not None:
+                dirnames[:] = [d for d in dirnames if d.lower() in gate]
             depth = len(Path(dirpath).parts) - base_depth
             if depth >= MAX_DEPTH:
                 dirnames[:] = []
@@ -152,6 +224,7 @@ def locate(name: str, size: int = 0, mtime: int = 0,
                     "mtime": _safe_mtime(p),
                     "score": _score(p, name, size, mtime),
                 })
+        truncated = truncated or root_truncated
 
     found.sort(key=lambda c: (c["score"], -c["mtime"]))
     hit = found[0] if found and found[0]["score"] < 40 else None
