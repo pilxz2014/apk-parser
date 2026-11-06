@@ -1182,8 +1182,9 @@ async function loadDroppedFile(file) {
     return;
   }
   dropMask(true, '正在本机定位「' + file.name + '」…');
+  let r = null;
   try {
-    const r = await api('/api/apk/locate', {
+    r = await api('/api/apk/locate', {
       method: 'POST',
       body: {
         name: file.name,
@@ -1191,26 +1192,29 @@ async function loadDroppedFile(file) {
         mtime: Math.floor((file.lastModified || 0) / 1000),
       },
     });
-    if (!r || !r.ok) {
-      toast((r && (r.hint || r.error)) || '没能定位到文件', 'bad');
-      return;
-    }
-    let use = r.path;
-    let cand = null;
-    // 同名命中多个（不同目录/不同体积）→ 让人自己挑。
-    // 浏览器只能给"文件名+体积"，猜错会让用户对着另一个文件排查半天。
-    if ((r.candidates || []).length > 1) {
-      cand = await chooseLocatedCandidate(r.candidates, r.path);
-      if (!cand) { toast('已取消（没有载入任何文件）', 'warn'); return; }
-      use = cand.path;
-    }
-    locateMemo(locateInfoFrom(r, cand, '拖入'));
-    applyPath(use, { auto: true, source: '拖入' });
   } catch (e) {
     toast('定位失败：' + e.message + '（可用「浏览…」直接选）', 'bad');
+    return;
   } finally {
+    // 定位一结束就撤遮罩 —— 后面可能弹「选择要解析的文件」对话框，
+    // 遮罩再挂着就会盖在对话框上面（真事：候选列表被挡得只剩按钮）
     dropMask(false);
   }
+  if (!r || !r.ok) {
+    toast((r && (r.hint || r.error)) || '没能定位到文件', 'bad');
+    return;
+  }
+  let use = r.path;
+  let cand = null;
+  // 同名命中多个（不同目录/不同体积）→ 让人自己挑。
+  // 浏览器只能给"文件名+体积"，猜错会让用户对着另一个文件排查半天。
+  if ((r.candidates || []).length > 1) {
+    cand = await chooseLocatedCandidate(r.candidates, r.path);
+    if (!cand) { toast('已取消（没有载入任何文件）', 'warn'); return; }
+    use = cand.path;
+  }
+  locateMemo(locateInfoFrom(r, cand, '拖入'));
+  applyPath(use, { auto: true, source: '拖入' });
 }
 
 function bindGlobalDrop() {
