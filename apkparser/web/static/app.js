@@ -2920,11 +2920,15 @@ function appDetailModal(pkg) {
     el('button', { class: 'btn sm', onclick: () => { go('device.launch.start', { pkg }); m.close(); } }, '启动组件'),
     el('button', { class: 'btn sm', onclick: () => { go('device.install.one', { pkg }); m.close(); } }, '安装'),
     el('button', { class: 'btn sm', onclick: async () => {
-      const p = await ask({ title: '导出到本机', message: '留空则存到 output/ 目录', placeholder: 'D:\\out.apk' });
-      if (p === null) return;
+      // 导出目标是**目录**：弹原生目录对话框选，别让人手打磁盘绝对路径。
+      // 原生后端不可用时 pickLocalDir 会退到页面内的目录浏览器。
+      const dir = await pickLocalDir({ title: '导出到哪个目录' });
+      if (!dir) return;                                  // 取消 → 什么都不做
       try {
-        const r = await api(`/api/apps/${encodeURIComponent(pkg)}/export`, { method: 'POST', body: { out: p, device: devParam() } });
-        toast(r.ok ? ('已导出 → ' + r.path) : (r.detail || '失败'), r.ok ? 'ok' : 'bad');
+        const r = await api(`/api/apps/${encodeURIComponent(pkg)}/export`, { method: 'POST', body: { out: dir, device: devParam() } });
+        if (!r.ok) { toast(r.detail || '导出失败', 'bad'); return; }
+        const n = (r.files || []).length;
+        toast('已导出 ' + n + ' 个文件 → ' + (r.dir || dir), 'ok');
       } catch (e) { toast(e.message, 'bad'); }
     } }, '导出 APK'),
   );
@@ -3162,19 +3166,32 @@ VIEWS['device.app.export'] = async function (host, cap, q) {
             method: 'POST', body: { out: out.value.trim(), device: devParam() },
           });
           res.innerHTML = '';
-          res.appendChild(r.ok
-            ? card('导出成功', null, kvBlock([['文件', r.path], ['大小', fmtBytes(r.bytes)]], ['文件']),
-                el('div', { class: 'row' },
-                  el('button', { class: 'btn sm', onclick: () => copyText(r.path) }, '复制路径'),
-                  el('button', {
-                    class: 'btn sm',
-                    onclick: () => go('local.parse', { path: r.path, tab: 'info' }),
-                  }, '解析它'),
-                  el('button', {
-                    class: 'btn sm', title: '打开它所在的目录（下次导出会默认落在那儿）',
-                    onclick: () => copyText(String(r.path || '').replace(/[\\/][^\\/]*$/, '')),
-                  }, '复制所在目录')))
-            : notice('bad', r.detail || '失败'));
+          if (!r.ok) { res.appendChild(notice('bad', r.detail || '失败')); return; }
+          // 响应形状：{dir, files:[{remote, local, bytes}]} —— split 包会有多个文件，
+          // 逐个列出来，别只报一个"成功"就完事
+          const files = r.files || [];
+          const first = files[0] || {};
+          const firstPath = first.local || '';
+          res.appendChild(card('导出成功', files.length + ' 个文件',
+            kvBlock([
+              ['目录', r.dir || out.value.trim()],
+              ['文件', firstPath],
+              ['大小', fmtBytes(first.bytes || 0)],
+            ], ['目录', '文件']),
+            el('div', { class: 'row' },
+              el('button', { class: 'btn sm', onclick: () => copyText(firstPath) }, '复制路径'),
+              el('button', {
+                class: 'btn sm', disabled: !firstPath,
+                onclick: () => go('local.parse', { path: firstPath, tab: 'info' }),
+              }, '解析它'),
+              el('button', {
+                class: 'btn sm', title: '下次导出会默认落在那儿',
+                onclick: () => copyText(r.dir || ''),
+              }, '复制所在目录'))));
+          if (files.length > 1) {
+            res.appendChild(notice('info', 'split 共 ' + files.length + ' 个文件，已全部拉到该目录：'
+              + files.slice(1).map((f) => f.local).join('、')));
+          }
         } catch (e) { res.innerHTML = ''; res.appendChild(notice('bad', e.message)); }
       },
     }, '导出')));
