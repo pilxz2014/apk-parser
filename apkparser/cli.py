@@ -77,8 +77,8 @@ def cmd_apk_info(ns) -> int:
     console.banner(info.app_label or info.file_name, info.path)
     print("  %s" % console.bold(info.package))
     print("  %s   %s" % (
-        console.cyan("v%s" % (info.version_name or "-")),
-        console.grey("build %s" % (info.version_code or "-"))))
+        console.cyan("versionName %s" % (info.version_name or "-")),
+        console.grey("versionCode %s" % (info.version_code or "-"))))
     print()
 
     rows = [
