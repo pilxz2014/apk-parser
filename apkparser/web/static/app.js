@@ -1206,12 +1206,21 @@ async function loadDroppedFile(file) {
   }
   let use = r.path;
   let cand = null;
-  // 同名命中多个（不同目录/不同体积）→ 让人自己挑。
-  // 浏览器只能给"文件名+体积"，猜错会让用户对着另一个文件排查半天。
-  if ((r.candidates || []).length > 1) {
-    cand = await chooseLocatedCandidate(r.candidates, r.path);
-    if (!cand) { toast('已取消（没有载入任何文件）', 'warn'); return; }
-    use = cand.path;
+  // 同名命中多个时：字节数和你拖的那个**完全一致**的直接用 —— debug/release
+  // 同名成对是 Gradle 常态，而体积每次构建都不同，两个包恰好同字节的概率
+  // 约等于零。只有体积对不上（拿不到精确匹配）才弹框让人挑。
+  const cands = r.candidates || [];
+  if (cands.length > 1) {
+    const exact = (file.size > 0) ? cands.find((c) => c.size === file.size) : null;
+    if (exact) {
+      use = exact.path;
+      cand = exact;
+      toast('同名命中 ' + cands.length + ' 个，已按字节数一致自动选中', 'ok');
+    } else {
+      cand = await chooseLocatedCandidate(cands, r.path);
+      if (!cand) { toast('已取消（没有载入任何文件）', 'warn'); return; }
+      use = cand.path;
+    }
   }
   locateMemo(locateInfoFrom(r, cand, '拖入'));
   applyPath(use, { auto: true, source: '拖入' });
@@ -1341,10 +1350,20 @@ async function resolveLocalFile(file) {
     if (r && r.ok && r.path) {
       let use = r.path;
       let cand = null;
-      if ((r.candidates || []).length > 1) {
-        cand = await chooseLocatedCandidate(r.candidates, r.path);
-        if (!cand) return null;
-        use = cand.path;
+      // 规则与拖入一致：同名多个时，字节数与原文件完全一致的自动用，
+      // 体积对不上才让人挑
+      const cands = r.candidates || [];
+      if (cands.length > 1) {
+        const exact = (file.size > 0) ? cands.find((c) => c.size === file.size) : null;
+        if (exact) {
+          use = exact.path;
+          cand = exact;
+          toast('同名命中 ' + cands.length + ' 个，已按字节数一致自动选中', 'ok');
+        } else {
+          cand = await chooseLocatedCandidate(cands, r.path);
+          if (!cand) return null;
+          use = cand.path;
+        }
       }
       locateMemo(locateInfoFrom(r, cand, '本机定位'));
       return { path: use, name: file.name, bytes: file.size, via: 'locate' };
