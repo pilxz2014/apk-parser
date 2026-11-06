@@ -1228,26 +1228,44 @@ async function loadDroppedFile(file) {
 
 function bindGlobalDrop() {
   let depth = 0;
+  // 撤遮罩延迟一拍：浏览器间 dragleave/dragenter 的触发顺序不保证
+  // "先 enter 后 leave"，计数器可能瞬时落到 0 又立刻回升 ——
+  // 直接撤遮罩会闪。等 120ms 确认真的离开了再撤。
+  let hideTimer = null;
+  const cancelHide = () => { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } };
+  const scheduleHide = () => {
+    if (hideTimer) return;
+    hideTimer = setTimeout(() => {
+      hideTimer = null;
+      if (depth === 0) dropMask(false);
+    }, 120);
+  };
+  // capture: true —— 全局拖拽逻辑在捕获阶段拦截，子元素就算
+  // stopPropagation() 也废不掉"拖入 APK"这个全局能力
+  const CAP = { capture: true };
   window.addEventListener('dragenter', (e) => {
     if (!dragHasFiles(e)) return;
     e.preventDefault();
+    cancelHide();
     depth += 1;
     dropMask(true);
-  });
+  }, CAP);
   window.addEventListener('dragover', (e) => {
     if (!dragHasFiles(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-  });
+  }, CAP);
   window.addEventListener('dragleave', (e) => {
     if (!dragHasFiles(e)) return;
+    e.preventDefault();
     depth = Math.max(0, depth - 1);
-    if (depth === 0) dropMask(false);
-  });
+    if (depth === 0) scheduleHide();
+  }, CAP);
   window.addEventListener('drop', (e) => {
     if (!dragHasFiles(e)) return;
     e.preventDefault();
     depth = 0;
+    cancelHide();
     dropMask(false);
     const files = Array.from(e.dataTransfer.files || []);
     if (!files.length) { toast('没读到文件', 'bad'); return; }
@@ -1255,7 +1273,7 @@ function bindGlobalDrop() {
       toast('一次拖一个：' + files.length + ' 个文件里先用「' + files[0].name + '」', 'warn');
     }
     loadDroppedFile(files[0]);
-  });
+  }, CAP);
 }
 
 /* ------------------------------------------------ 选 APK：原生对话框 → 浏览器兜底
