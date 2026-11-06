@@ -46,7 +46,7 @@ def precheck(apk_path, serial: str = "", deep_sign: bool = False) -> List[dict]:
                            "文件可能损坏或不是 APK", "INSTALL_FAILED_INVALID_APK"))
         return items
     items.append(_item("pass", "APK 可解析",
-                       "%s · v%s (%s)" % (info.package, info.version_name, info.version_code),
+                       "%s · versionName %s · versionCode %s" % (info.package, info.version_name, info.version_code),
                        package=info.package, versionName=info.version_name,
                        versionCode=info.version_code))
 
@@ -111,7 +111,7 @@ def precheck(apk_path, serial: str = "", deep_sign: bool = False) -> List[dict]:
                 if info.version_code < inst_vc:
                     items.append(_item(
                         "fail", "版本号",
-                        "要装 build %s，设备上已是 build %s —— 覆盖安装会被拒绝（降级）" % (
+                        "要装 versionCode %s，设备上已是 versionCode %s —— 覆盖安装会被拒绝（降级）" % (
                             info.version_code, inst_vc),
                         "确认要降级就勾选「允许降级」（对应 -d）",
                         "INSTALL_FAILED_VERSION_DOWNGRADE",
@@ -120,7 +120,7 @@ def precheck(apk_path, serial: str = "", deep_sign: bool = False) -> List[dict]:
                         deviceVersionName=inst_vn, deviceVersionCode=inst_vc))
                 elif info.version_code == inst_vc:
                     items.append(_item("warn", "版本号",
-                                       "与设备上已装的 build %s 相同，属于重装" % inst_vc,
+                                       "与设备上已装的 versionCode %s 相同，属于重装" % inst_vc,
                                        "会保留应用数据",
                                        package=info.package,
                                        versionName=info.version_name,
@@ -129,7 +129,7 @@ def precheck(apk_path, serial: str = "", deep_sign: bool = False) -> List[dict]:
                                        deviceVersionCode=inst_vc))
                 else:
                     items.append(_item("pass", "版本号",
-                                       "升级：build %s → %s" % (inst_vc, info.version_code),
+                                       "升级：versionCode %s → %s" % (inst_vc, info.version_code),
                                        package=info.package,
                                        versionName=info.version_name,
                                        versionCode=info.version_code,

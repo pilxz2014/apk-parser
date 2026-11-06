@@ -214,8 +214,8 @@ def build_card_html(info: ApkInfo, standalone: bool = True) -> str:
     <div class="appname">{label}</div>
     <div class="pkg">{pkg}</div>
     <div class="verline">
-      <span class="badge">v{ver}</span>
-      <span class="badge plain">build {code}</span>
+      <span class="badge">versionName {ver}</span>
+      <span class="badge plain">versionCode {code}</span>
     </div>
     <div class="chips">{chips}</div>
   </div>

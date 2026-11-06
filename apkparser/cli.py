@@ -270,7 +270,7 @@ def cmd_apk_compare_device(ns) -> int:
         else:
             console.banner("设备对比", info.package)
             console.info("设备（%s）上还没装这个包 —— 这是一次全新安装" % serial)
-            console.kv([("本机版本", "v%s (%s)" % (info.version_name, info.version_code))])
+            console.kv([("本机版本", "versionName %s · versionCode %s" % (info.version_name, info.version_code))])
         return 0
 
     lvc, dvc = info.version_code or 0, int(dev.get("versionCode") or 0)
@@ -303,8 +303,8 @@ def cmd_apk_compare_device(ns) -> int:
 
     console.banner("与设备已装版本对比", info.package)
     console.kv([
-        ("本机版本", "v%s  build %s" % (info.version_name, info.version_code)),
-        ("设备版本", "v%s  build %s" % (dev.get("versionName") or "-", dev.get("versionCode") or "-")),
+        ("本机版本", "versionName %s · versionCode %s" % (info.version_name, info.version_code)),
+        ("设备版本", "versionName %s · versionCode %s" % (dev.get("versionName") or "-", dev.get("versionCode") or "-")),
         ("版本结论", vtext),
     ])
     v = cmp_res.get("verdict")
@@ -1134,10 +1134,10 @@ def _show_downgrade(hits: list) -> None:
         it = _pre_item(r, _DOWNGRADE_CODE)
         console.kv([
             ("包名", it.get("package") or r.get("file") or ""),
-            ("设备上", "v%s (build %s)" % (it.get("deviceVersionName") or "-",
-                                          it.get("deviceVersionCode") or "?")),
-            ("你装的", "v%s (build %s)" % (it.get("versionName") or "-",
-                                          it.get("versionCode") or "?")),
+            ("设备上", "versionName %s · versionCode %s" % (it.get("deviceVersionName") or "-",
+                                                            it.get("deviceVersionCode") or "?")),
+            ("你装的", "versionName %s · versionCode %s" % (it.get("versionName") or "-",
+                                                            it.get("versionCode") or "?")),
         ])
     console.hint("Android 默认拒绝降级，必须显式加 -d 才会放行。")
     console.hint("降级覆盖一般会保留应用数据，但版本会退回去。")
@@ -1189,8 +1189,8 @@ def cmd_install_one(ns) -> int:
             console.banner(_info.app_label or _info.file_name, _info.path)
             console.kv([
                 ("包名", _info.package or "-"),
-                ("版本", "v%s (build %s)" % (_info.version_name or "-",
-                                             _info.version_code or "-")),
+                ("版本", "versionName %s · versionCode %s" % (_info.version_name or "-",
+                                                               _info.version_code or "-")),
                 ("大小", "%s（解压后 %s）" % (human_size(_info.file_size),
                                              human_size(sum(_info.size_breakdown.values())))),
                 ("SDK", "min %d / target %d" % (_info.min_sdk, _info.target_sdk)),

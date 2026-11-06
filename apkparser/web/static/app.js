@@ -2129,7 +2129,8 @@ function renderDiff(box, d) {
   const frows = [];
   const push = (label, v) => { if (v !== undefined && v !== null && v !== '') frows.push({ k: label, v: String(v) }); };
   push('包名', f.package);
-  push('版本', f.versionName ? (f.versionName + '（build ' + f.versionCode + '）') : '');
+  push('versionName', f.versionName || '');
+  push('versionCode', f.versionCode);
   push('安装器', f.installer ? (f.installer + (f.installer === 'null' ? '（adb 装的）' : '')) : '');
   push('是否系统应用', f.system === undefined ? '' : (f.system ? '是' : '否'));
   push('首次安装', f.firstInstall);
@@ -2158,7 +2159,8 @@ VIEWS['local.scan'] = async function (host, cap, q) {
       out.appendChild(card(`共 ${r.count} / ${r.total} 个`, null, dataTable([
         { key: 'appLabel', label: '应用名' },
         { key: 'package', label: '包名', mono: true },
-        { key: 'versionName', label: '版本', width: '90px' },
+        { key: 'versionName', label: 'versionName', width: '96px' },
+        { key: 'versionCode', label: 'versionCode', width: '84px' },
         { key: 'bytes', label: '大小', num: true, width: '90px', render: (r2) => fmtBytes(r2.bytes) },
         { key: 'path', label: '路径', mono: true },
       ], r.items || [], {
@@ -2803,8 +2805,12 @@ VIEWS['device.apps'] = async function (host, cap, q) {
       },
       { key: 'package', label: '包名', mono: true },
       {
-        key: 'versionName', label: '版本', width: '104px',
-        render: (a) => a.versionName || (a.versionCode ? 'build ' + a.versionCode : ''),
+        key: 'versionName', label: 'versionName', width: '96px',
+        render: (a) => a.versionName || '-',
+      },
+      {
+        key: 'versionCode', label: 'versionCode', width: '84px',
+        render: (a) => a.versionCode || '-',
       },
       {
         key: 'system', label: '类型', width: '70px',
@@ -2886,7 +2892,8 @@ function appDetailModal(pkg) {
     body.innerHTML = '';
     if (d.error) { body.appendChild(notice('bad', d.error)); return; }
     body.appendChild(kvBlock([
-      ['应用名', d.label], ['包名', d.package], ['版本', `v${d.versionName} (${d.versionCode})`],
+      ['应用名', d.label], ['包名', d.package],
+      ['versionName', d.versionName || '-'], ['versionCode', d.versionCode ?? '-'],
       ['UID', d.uid], ['minSdk / targetSdk', `${d.minSdk ?? '-'} / ${d.targetSdk ?? '-'}`],
       ['首次安装', d.firstInstallTime], ['最后更新', d.lastUpdateTime],
       ['APK 路径', d.apkPath], ['数据目录', d.dataDir], ['安装来源', d.installer],
@@ -2939,7 +2946,8 @@ const appDetailOwnTab = async function (host, cap, q) {
     out.innerHTML = '';
     if (d.error) { out.appendChild(notice('bad', d.error)); return; }
     out.appendChild(card(d.label || d.package, null, kvBlock([
-      ['包名', d.package], ['版本', `v${d.versionName} (${d.versionCode})`],
+      ['包名', d.package],
+      ['versionName', d.versionName || '-'], ['versionCode', d.versionCode ?? '-'],
       ['UID', d.uid], ['minSdk / targetSdk', `${d.minSdk ?? '-'} / ${d.targetSdk ?? '-'}`],
       ['首次安装', d.firstInstallTime], ['最后更新', d.lastUpdateTime],
       ['APK 路径', d.apkPath], ['数据目录', d.dataDir], ['安装来源', d.installer],
