@@ -378,8 +378,8 @@ function codeBlock(cmd, { label = '' } = {}) {
     (label ? label + '\n' : '') + cmd);
 }
 
-function tag(text, kind = '') {
-  return el('span', { class: 'tag ' + kind }, text);
+function tag(text, kind = '', attrs = null) {
+  return el('span', Object.assign({ class: 'tag ' + kind }, attrs || {}), text);
 }
 
 /**
@@ -1682,6 +1682,17 @@ function goTab(parentId, tabKey, extraQ) {
   go(parentId, Object.assign({}, extraQ || {}, { tab: tabKey }));
 }
 
+/* 渠道悬停说明：主依据 + 全部线索（一个包可能同时写了 apkv / registFlag）。 */
+function channelTip(d) {
+  const lines = ['依据：' + (d.channelSource || '未知')];
+  const items = d.channelItems || [];
+  if (items.length > 1) {
+    lines.push('全部线索：');
+    for (const it of items) lines.push('  ' + it.key + ' = ' + it.value + '  （' + it.source + '）');
+  }
+  return lines.join('\n');
+}
+
 function apkInfoView(host, d, q) {
   if (d.error && !d.package) {
     host.appendChild(card('解析失败', null, notice('bad', d.error)));
@@ -1695,7 +1706,10 @@ function apkInfoView(host, d, q) {
       el('div', { class: 'apk-ver' },
         el('span', { class: 'v' }, 'versionName ' + (d.versionName || '-')),
         tag('versionCode ' + (d.versionCode ?? '-')),
-        d.channel ? tag('渠道 ' + d.channel, 'brand') : null,
+        d.channel ? tag(
+          '渠道 ' + d.channel + (d.channelConfidence === 'low' ? '（推断）' : ''),
+          d.channelConfidence === 'low' ? '' : 'brand',
+          { title: channelTip(d) }) : null,
         d.debuggable ? tag('debuggable', 'warn') : null,
         tag(d.fileName)),
       el('div', { style: { marginTop: '7px', color: 'var(--dim)', fontSize: '12px' } },
@@ -1731,6 +1745,11 @@ function apkInfoView(host, d, q) {
 
   host.appendChild(card('基本信息', null, kvBlock([
     ['文件大小', `${fmtBytes(d.fileSize)}（解压后 ${fmtBytes(Object.values(d.sizeBreakdown || {}).reduce((a, b) => a + (b || 0), 0))}）`],
+    // 渠道是"这个包是哪个渠道打的"的唯一线索，比 ABI/Dex 更该靠前
+    ...(d.channel ? [[
+      '渠道',
+      `${d.channel}${d.channelConfidence === 'low' ? '（推断）' : ''}   依据：${d.channelSource || '未知'}`,
+    ]] : []),
     ['minSdk / targetSdk', `${d.minSdk ?? '-'} / ${d.targetSdk ?? '-'}${d.compileSdk ? '   compileSdk ' + d.compileSdk : ''}`],
     ['ABI', (d.abis || []).join(' / ') || '（无 native 库）'],
     ['Dex', `${(d.dexNames || []).length} 个   ${(d.dexNames || []).join(' ')}`],

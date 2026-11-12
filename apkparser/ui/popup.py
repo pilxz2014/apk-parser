@@ -197,7 +197,11 @@ def build_card_html(info: ApkInfo, standalone: bool = True) -> str:
     if info.abis:
         chips.append('<span class="chip">%s</span>' % _esc(" / ".join(info.abis)))
     if info.channel:
-        chips.append('<span class="chip good">渠道 %s</span>' % _esc(info.channel))
+        # 推断出来的渠道要标出来 —— 不标就等于把猜测当事实
+        sup = "（推断）" if info.channel_confidence == "low" else ""
+        chips.append('<span class="chip %s" title="依据：%s">渠道 %s%s</span>' % (
+            "good" if info.channel_confidence != "low" else "",
+            _esc(info.channel_source or "未知"), _esc(info.channel), sup))
     chips.append('<span class="chip %s">minSdk %d</span>' % ("bad" if info.min_sdk >= 26 else "", info.min_sdk))
     chips.append('<span class="chip">targetSdk %d</span>' % info.target_sdk)
     if info.debuggable:

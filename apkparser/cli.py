@@ -94,7 +94,10 @@ def cmd_apk_info(ns) -> int:
                             "（危险 %d）" % len(info.dangerous_permissions) if info.dangerous_permissions else "")),
     ]
     if info.channel:
-        rows.insert(0, ("渠道", info.channel))
+        detail = info.channel + ("（推断）" if info.channel_confidence == "low" else "")
+        if info.channel_source:
+            detail += "   依据：%s" % info.channel_source
+        rows.insert(0, ("渠道", detail))
     console.kv(rows)
 
     if info.signature:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import arsc as arsc_mod
+from . import channel as channel_mod
 from .axml import Node, parse_manifest
 from .cert import SignatureInfo, analyze as analyze_signature
 from .reader import ApkError, ApkReader
@@ -237,6 +238,11 @@ class ApkInfo:
     icon_data_uri: str = ""
 
     channel: str = ""
+    # 渠道的**依据**。只给一个值、不给来源，等于让人无从判断该不该信
+    # （`high` = 包里明确写着；`low` = 从文件名+dex 推断出来的）
+    channel_source: str = ""
+    channel_confidence: str = ""
+    channel_items: List[dict] = field(default_factory=list)
     parse_ms: int = 0
     warnings: List[str] = field(default_factory=list)
     error: str = ""
@@ -324,6 +330,9 @@ class ApkInfo:
             "nativeLibCount": self.native_lib_count,
             "sizeBreakdown": self.size_breakdown,
             "channel": self.channel,
+            "channelSource": self.channel_source,
+            "channelConfidence": self.channel_confidence,
+            "channelItems": self.channel_items,
             "parseMs": self.parse_ms,
             "warnings": self.warnings,
             "error": self.error,
@@ -464,7 +473,13 @@ def _read_into(info: ApkInfo, reader: ApkReader, with_signature: bool = True,
     info.dex_names = reader.dex_names()
     info.native_lib_count = len(reader.native_lib_names())
     info.size_breakdown = reader.size_breakdown()
-    info.channel = _detect_channel(reader, root, arsc_table)
+    # 设备上的 APK 走 adb 按需读取，读 dex 太贵 → 只走便宜的几层
+    ch = channel_mod.detect(reader, root, arsc_table, info.file_name, _resolve,
+                            allow_dex=reader.fileobj is None)
+    info.channel = ch["value"]
+    info.channel_source = ch["source"]
+    info.channel_confidence = ch["confidence"]
+    info.channel_items = ch["items"]
 
     if with_icon:
         _fill_icon(info, reader, root, arsc_table)
@@ -710,48 +725,3 @@ def _dedupe(seq: List[str]) -> List[str]:
             seen.add(s)
             out.append(s)
     return out
-
-
-# ---------------------------------------------------------------- 渠道
-
-_CHANNEL_META = re.compile(r"(channel|渠道)", re.IGNORECASE)
-
-
-def _detect_channel(reader: ApkReader, root: Node, arsc_t) -> str:
-    """识别打包渠道（面向多渠道构建的日常排查）。
-
-    三条线索按可信度排序：
-      1. manifest 里的 meta-data（name 含 channel）
-      2. META-INF/ 下的渠道标记文件
-      3. 内置渠道清单文件（assets/channel*、assets/*channel*）
-    """
-    app = root.first("application")
-    if app is not None:
-        for meta in app.find("meta-data"):
-            name = str(meta.raw("name") or meta.attr("name") or "")
-            if _CHANNEL_META.search(name):
-                val = _resolve(meta, "value", arsc_t)
-                if val:
-                    return str(val)
-
-    for name in reader.names:
-        if name.upper().startswith("META-INF/") and "channel" in name.lower():
-            tail = name.rsplit("/", 1)[-1]
-            if tail.upper() in ("MANIFEST.MF", "CERT.SF"):
-                continue
-            if tail.lower().endswith((".rsa", ".dsa", ".ec", ".sf", ".mf")):
-                continue
-            tag = tail.rsplit(".", 1)[0]
-            tag = re.sub(r"^channel[_-]?", "", tag, flags=re.IGNORECASE)
-            return tag or tail
-
-    for name in reader.names:
-        low = name.lower()
-        if low.startswith("assets/") and "channel" in low and low.endswith((".txt", ".json", ".config", ".properties")):
-            blob = reader.read(name)
-            if blob:
-                text = blob.decode("utf-8", errors="replace").strip()
-                if 0 < len(text) <= 64:
-                    return text.splitlines()[0].strip()
-            return name.rsplit("/", 1)[-1]
-    return ""
